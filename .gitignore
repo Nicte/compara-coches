@@ -25,4 +25,18 @@ dist-ssr
 
 # Optional DGT helper outputs not used by the app runtime
 data/dgt/manifest*.csv
+data/dgt/*.zip
 data/dgt_test/
+# Environment variables
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+*.egg-info/
+
+# Vite cache
+.vite/
