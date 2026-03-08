@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowDown,
   ArrowUp,
@@ -605,7 +605,10 @@ function App() {
   )
   const [brandSearch, setBrandSearch] = useState("")
   const [modelSearch, setModelSearch] = useState("")
+  const [isBrandDropdownOpen, setIsBrandDropdownOpen] = useState(false)
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false)
+  const brandDropdownRef = useRef<HTMLDivElement>(null)
+  const modelDropdownRef = useRef<HTMLDivElement>(null)
 
   const {
     filters,
@@ -630,6 +633,66 @@ function App() {
       setIsColumnPanelOpen(false)
     }
   }, [viewMode])
+
+  useEffect(() => {
+    if (isBrandDropdownOpen) {
+      const input = document.querySelector<HTMLInputElement>(
+        'input[placeholder="Buscar marca..."]'
+      )
+      input?.focus()
+    }
+  }, [isBrandDropdownOpen])
+
+  useEffect(() => {
+    if (isModelDropdownOpen) {
+      const input = document.querySelector<HTMLInputElement>(
+        'input[placeholder="Buscar modelo..."]'
+      )
+      input?.focus()
+    }
+  }, [isModelDropdownOpen])
+
+  // Close brand dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        isBrandDropdownOpen &&
+        brandDropdownRef.current &&
+        !brandDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsBrandDropdownOpen(false)
+      }
+    }
+
+    if (isBrandDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [isBrandDropdownOpen])
+
+  // Close model dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        isModelDropdownOpen &&
+        modelDropdownRef.current &&
+        !modelDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsModelDropdownOpen(false)
+      }
+    }
+
+    if (isModelDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [isModelDropdownOpen])
 
   useEffect(() => {
     const queryString = serializeUrlState(state)
@@ -884,9 +947,7 @@ function App() {
     updateFilters((previous) => ({
       ...previous,
       brands: previous.brands.filter((b) => b !== brand),
-      models: previous.models.filter(
-        (m) => !modelsByBrand[brand]?.includes(m)
-      ),
+      models: previous.models.filter((m) => !modelsByBrand[brand]?.includes(m)),
     }))
   }
 
@@ -907,9 +968,7 @@ function App() {
   const filteredBrands = useMemo(() => {
     if (!brandSearch.trim()) return uniqueBrands
     const search = brandSearch.toLowerCase()
-    return uniqueBrands.filter((brand) =>
-      brand.toLowerCase().includes(search)
-    )
+    return uniqueBrands.filter((brand) => brand.toLowerCase().includes(search))
   }, [brandSearch])
 
   const availableModels = useMemo(() => {
@@ -1004,8 +1063,7 @@ function App() {
 
                 <p className="max-w-2xl text-sm text-slate-400 sm:text-base">
                   Comparador de coches en Espana con foco en matriculaciones
-                  reales. Filtra, ordena y comparte cada vista directamente con
-                  la URL.
+                  reales
                 </p>
               </div>
 
@@ -1064,9 +1122,23 @@ function App() {
                         }))
                       }
                       placeholder="Ej: Corolla, SUV, Peugeot"
-                      className="pr-3 pl-8"
+                      className={filters.query ? "pr-8 pl-8" : "pr-3 pl-8"}
                       aria-describedby="search-hint"
                     />
+                    {filters.query && (
+                      <button
+                        onClick={() =>
+                          updateFilters((previous) => ({
+                            ...previous,
+                            query: "",
+                          }))
+                        }
+                        className="absolute top-2.5 right-2.5 text-muted-foreground hover:text-foreground"
+                        aria-label="Limpiar búsqueda"
+                      >
+                        <X className="size-4" />
+                      </button>
+                    )}
                   </span>
                   <p id="search-hint" className="text-xs text-muted-foreground">
                     Marca o modelo
@@ -1079,68 +1151,103 @@ function App() {
                   </p>
                 )}
 
-                {/* Option 1: Search + Tags for Marca */}
-                <div className="space-y-2">
-                  <p className="font-medium">Marca (Option 1: Search + Tags)</p>
-                  
-                  {/* Selected brands as badges */}
-                  {filters.brands.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {filters.brands.map((brand) => (
-                        <Badge
-                          key={brand}
-                          variant="secondary"
-                          className="gap-1 pr-1"
-                        >
-                          {brand}
-                          <button
-                            onClick={() => removeBrand(brand)}
-                            className="ml-1 rounded-sm hover:bg-muted"
-                          >
-                            <X className="size-3" />
-                          </button>
-                        </Badge>
-                      ))}
-                    </div>
-                  )}
+                {/* Marca filter - Multi-Select Dropdown */}
+                <div className="space-y-2" ref={brandDropdownRef}>
+                  <p className="font-medium">Marca</p>
 
-                  {/* Search input */}
-                  <div className="relative">
-                    <Search className="absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
-                    <Input
-                      value={brandSearch}
-                      onChange={(e) => setBrandSearch(e.target.value)}
-                      placeholder="Buscar marca..."
-                      className="pr-3 pl-8"
+                  {/* Dropdown trigger */}
+                  <button
+                    onClick={() => setIsBrandDropdownOpen(!isBrandDropdownOpen)}
+                    className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-accent"
+                  >
+                    <span className="text-muted-foreground">
+                      {filters.brands.length === 0
+                        ? "Seleccionar marcas..."
+                        : `${filters.brands.length} seleccionada${filters.brands.length > 1 ? "s" : ""}`}
+                    </span>
+                    <ChevronDown
+                      className={`size-4 transition-transform ${
+                        isBrandDropdownOpen ? "rotate-180" : ""
+                      }`}
                     />
-                  </div>
+                  </button>
 
-                  {/* Filtered brand results */}
-                  {brandSearch && filteredBrands.length > 0 && (
-                    <div className="max-h-48 overflow-y-auto rounded-md border bg-popover">
-                      {filteredBrands
-                        .filter((brand) => !filters.brands.includes(brand))
-                        .map((brand) => (
-                          <button
-                            key={brand}
-                            onClick={() => addBrand(brand)}
-                            className="w-full px-3 py-2 text-left text-sm hover:bg-accent"
-                          >
-                            {brand}
-                          </button>
-                        ))}
+                  {/* Dropdown content */}
+                  {isBrandDropdownOpen && (
+                    <div className="rounded-md border bg-popover p-2 shadow-md">
+                      {/* Search inside dropdown */}
+                      <div className="relative mb-2">
+                        <Search className="absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
+                        <Input
+                          value={brandSearch}
+                          onChange={(e) => setBrandSearch(e.target.value)}
+                          placeholder="Buscar marca..."
+                          className="pr-3 pl-8"
+                        />
+                      </div>
+
+                      {/* Selected brands */}
+                      {filters.brands.length > 0 && (
+                        <div className="mb-2 flex flex-wrap gap-1 border-b pb-2">
+                          {filters.brands.map((brand) => (
+                            <Badge
+                              key={brand}
+                              variant="secondary"
+                              className="gap-1 pr-1"
+                            >
+                              {brand}
+                              <button
+                                onClick={() => removeBrand(brand)}
+                                className="ml-1 rounded-sm hover:bg-muted"
+                              >
+                                <X className="size-3" />
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Brand list */}
+                      <div className="max-h-48 overflow-y-auto">
+                        {filteredBrands.length > 0 ? (
+                          filteredBrands.map((brand) => (
+                            <label
+                              key={brand}
+                              className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-accent"
+                            >
+                              <Checkbox
+                                checked={filters.brands.includes(brand)}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    addBrand(brand)
+                                  } else {
+                                    removeBrand(brand)
+                                  }
+                                }}
+                              />
+                              <span className="text-sm">{brand}</span>
+                            </label>
+                          ))
+                        ) : (
+                          <p className="py-2 text-center text-sm text-muted-foreground">
+                            No se encontraron marcas
+                          </p>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
 
-                {/* Option 2: Dropdown Multi-Select for Modelo */}
+                {/* Modelo filter - Multi-Select Dropdown (only show when brands selected) */}
                 {filters.brands.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="font-medium">Modelo (Option 2: Multi-Select Dropdown)</p>
-                    
+                  <div className="space-y-2" ref={modelDropdownRef}>
+                    <p className="font-medium">Modelo</p>
+
                     {/* Dropdown trigger */}
                     <button
-                      onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+                      onClick={() =>
+                        setIsModelDropdownOpen(!isModelDropdownOpen)
+                      }
                       className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-accent"
                     >
                       <span className="text-muted-foreground">
