@@ -14,6 +14,7 @@ import {
   Table as TableIcon,
   Trash2,
   Trees,
+  X,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -602,6 +603,9 @@ function App() {
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(["marca", "motor", "cambio", "etiqueta", "carroceria"])
   )
+  const [brandSearch, setBrandSearch] = useState("")
+  const [modelSearch, setModelSearch] = useState("")
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false)
 
   const {
     filters,
@@ -868,6 +872,59 @@ function App() {
     }))
   }
 
+  const addBrand = (brand: string) => {
+    updateFilters((previous) => ({
+      ...previous,
+      brands: [...previous.brands, brand],
+    }))
+    setBrandSearch("")
+  }
+
+  const removeBrand = (brand: string) => {
+    updateFilters((previous) => ({
+      ...previous,
+      brands: previous.brands.filter((b) => b !== brand),
+      models: previous.models.filter(
+        (m) => !modelsByBrand[brand]?.includes(m)
+      ),
+    }))
+  }
+
+  const addModel = (model: string) => {
+    updateFilters((previous) => ({
+      ...previous,
+      models: [...previous.models, model],
+    }))
+  }
+
+  const removeModel = (model: string) => {
+    updateFilters((previous) => ({
+      ...previous,
+      models: previous.models.filter((m) => m !== model),
+    }))
+  }
+
+  const filteredBrands = useMemo(() => {
+    if (!brandSearch.trim()) return uniqueBrands
+    const search = brandSearch.toLowerCase()
+    return uniqueBrands.filter((brand) =>
+      brand.toLowerCase().includes(search)
+    )
+  }, [brandSearch])
+
+  const availableModels = useMemo(() => {
+    if (filters.brands.length === 0) return []
+    return filters.brands.flatMap((brand) => modelsByBrand[brand] || [])
+  }, [filters.brands])
+
+  const filteredModels = useMemo(() => {
+    if (!modelSearch.trim()) return availableModels
+    const search = modelSearch.toLowerCase()
+    return availableModels.filter((model) =>
+      model.toLowerCase().includes(search)
+    )
+  }, [modelSearch, availableModels])
+
   const toggleVisibleColumn = (
     columnKey: TableColumnKey,
     shouldShow: boolean
@@ -1022,100 +1079,144 @@ function App() {
                   </p>
                 )}
 
+                {/* Option 1: Search + Tags for Marca */}
                 <div className="space-y-2">
-                  <button
-                    onClick={() =>
-                      setExpandedSections(
-                        toggleSection(expandedSections, "marca")
-                      )
-                    }
-                    className="flex w-full items-center justify-between rounded-lg px-1 py-1 transition-colors hover:bg-accent/50"
-                  >
-                    <p className="font-medium">Marca</p>
-                    <ChevronDown
-                      className={`size-4 transition-transform ${
-                        expandedSections.has("marca") ? "" : "-rotate-90"
-                      }`}
-                    />
-                  </button>
-                  {expandedSections.has("marca") && (
-                    <div className="grid gap-2">
-                      {uniqueBrands.map((brand) => (
-                        <label
+                  <p className="font-medium">Marca (Option 1: Search + Tags)</p>
+                  
+                  {/* Selected brands as badges */}
+                  {filters.brands.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {filters.brands.map((brand) => (
+                        <Badge
                           key={brand}
-                          className="inline-flex items-center gap-2"
+                          variant="secondary"
+                          className="gap-1 pr-1"
                         >
-                          <Checkbox
-                            checked={filters.brands.includes(brand)}
-                            onCheckedChange={(checked) =>
-                              updateFilters((previous) => ({
-                                ...previous,
-                                brands: toggleArrayValue(
-                                  previous.brands,
-                                  brand,
-                                  checked === true
-                                ),
-                                // Reset models if unchecking a brand
-                                models:
-                                  checked === false
-                                    ? previous.models.filter(
-                                        (m) =>
-                                          !modelsByBrand[brand]?.includes(m)
-                                      )
-                                    : previous.models,
-                              }))
-                            }
-                          />
-                          <span>{brand}</span>
-                        </label>
+                          {brand}
+                          <button
+                            onClick={() => removeBrand(brand)}
+                            className="ml-1 rounded-sm hover:bg-muted"
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </Badge>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Search input */}
+                  <div className="relative">
+                    <Search className="absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
+                    <Input
+                      value={brandSearch}
+                      onChange={(e) => setBrandSearch(e.target.value)}
+                      placeholder="Buscar marca..."
+                      className="pr-3 pl-8"
+                    />
+                  </div>
+
+                  {/* Filtered brand results */}
+                  {brandSearch && filteredBrands.length > 0 && (
+                    <div className="max-h-48 overflow-y-auto rounded-md border bg-popover">
+                      {filteredBrands
+                        .filter((brand) => !filters.brands.includes(brand))
+                        .map((brand) => (
+                          <button
+                            key={brand}
+                            onClick={() => addBrand(brand)}
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-accent"
+                          >
+                            {brand}
+                          </button>
+                        ))}
                     </div>
                   )}
                 </div>
 
+                {/* Option 2: Dropdown Multi-Select for Modelo */}
                 {filters.brands.length > 0 && (
                   <div className="space-y-2">
+                    <p className="font-medium">Modelo (Option 2: Multi-Select Dropdown)</p>
+                    
+                    {/* Dropdown trigger */}
                     <button
-                      onClick={() =>
-                        setExpandedSections(
-                          toggleSection(expandedSections, "modelo")
-                        )
-                      }
-                      className="flex w-full items-center justify-between rounded-lg px-1 py-1 transition-colors hover:bg-accent/50"
+                      onClick={() => setIsModelDropdownOpen(!isModelDropdownOpen)}
+                      className="flex w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm hover:bg-accent"
                     >
-                      <p className="font-medium">Modelo</p>
+                      <span className="text-muted-foreground">
+                        {filters.models.length === 0
+                          ? "Seleccionar modelos..."
+                          : `${filters.models.length} seleccionado${filters.models.length > 1 ? "s" : ""}`}
+                      </span>
                       <ChevronDown
                         className={`size-4 transition-transform ${
-                          expandedSections.has("modelo") ? "" : "-rotate-90"
+                          isModelDropdownOpen ? "rotate-180" : ""
                         }`}
                       />
                     </button>
-                    {expandedSections.has("modelo") && (
-                      <div className="grid gap-2">
-                        {filters.brands.flatMap(
-                          (brand) =>
-                            modelsByBrand[brand]?.map((model) => (
+
+                    {/* Dropdown content */}
+                    {isModelDropdownOpen && (
+                      <div className="rounded-md border bg-popover p-2 shadow-md">
+                        {/* Search inside dropdown */}
+                        <div className="relative mb-2">
+                          <Search className="absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
+                          <Input
+                            value={modelSearch}
+                            onChange={(e) => setModelSearch(e.target.value)}
+                            placeholder="Buscar modelo..."
+                            className="pr-3 pl-8"
+                          />
+                        </div>
+
+                        {/* Selected models */}
+                        {filters.models.length > 0 && (
+                          <div className="mb-2 flex flex-wrap gap-1 border-b pb-2">
+                            {filters.models.map((model) => (
+                              <Badge
+                                key={model}
+                                variant="secondary"
+                                className="gap-1 pr-1"
+                              >
+                                {model}
+                                <button
+                                  onClick={() => removeModel(model)}
+                                  className="ml-1 rounded-sm hover:bg-muted"
+                                >
+                                  <X className="size-3" />
+                                </button>
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Model list */}
+                        <div className="max-h-48 overflow-y-auto">
+                          {filteredModels.length > 0 ? (
+                            filteredModels.map((model) => (
                               <label
                                 key={model}
-                                className="inline-flex items-center gap-2"
+                                className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-accent"
                               >
                                 <Checkbox
                                   checked={filters.models.includes(model)}
-                                  onCheckedChange={(checked) =>
-                                    updateFilters((previous) => ({
-                                      ...previous,
-                                      models: toggleArrayValue(
-                                        previous.models,
-                                        model,
-                                        checked === true
-                                      ),
-                                    }))
-                                  }
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      addModel(model)
+                                    } else {
+                                      removeModel(model)
+                                    }
+                                  }}
                                 />
-                                <span>{model}</span>
+                                <span className="text-sm">{model}</span>
                               </label>
-                            )) ?? []
-                        )}
+                            ))
+                          ) : (
+                            <p className="py-2 text-center text-sm text-muted-foreground">
+                              No se encontraron modelos
+                            </p>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
