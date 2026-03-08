@@ -6,6 +6,7 @@ import {
   CarFront,
   Filter,
   ImageOff,
+  Info,
   List,
   MoveHorizontal,
   Ruler,
@@ -21,6 +22,13 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Table,
   TableBody,
   TableCell,
@@ -30,6 +38,12 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
   bodyTypeLabels,
   carsSpainTopSalesRolling12m,
   dataLastUpdated,
@@ -37,6 +51,8 @@ import {
   dgtLabelLabels,
   salesWindowLabel,
   salesWindowMonths,
+  type Car,
+  type CarVersion,
   type BodyType,
   type DgtLabel,
   powertrainLabels,
@@ -46,7 +62,6 @@ import {
 } from "@/data/cars-es"
 
 type SortField =
-  | "salesRank12m"
   | "salesUnits12m"
   | "brandModel"
   | "lengthMm"
@@ -58,7 +73,6 @@ type ViewMode = "cards" | "table"
 type TableColumnKey =
   | "photo"
   | "model"
-  | "salesRank12m"
   | "salesUnits12m"
   | "bodyType"
   | "dgtLabels"
@@ -67,6 +81,7 @@ type TableColumnKey =
   | "lengthMm"
   | "widthMm"
   | "trunkLiters"
+type ResultsLimit = "15" | "30" | "50" | "all"
 
 type Filters = {
   query: string
@@ -88,11 +103,26 @@ type UrlState = {
   sortDirection: SortDirection
   viewMode: ViewMode
   visibleColumns: TableColumnKey[]
+  resultsLimit: ResultsLimit
 }
 
-const defaultSortField: SortField = "salesRank12m"
-const defaultSortDirection: SortDirection = "asc"
+type CarWithVisibleVersions = Car & {
+  matchingVersions: CarVersion[]
+  visiblePowertrains: PowertrainType[]
+  visibleTransmissions: TransmissionType[]
+  visibleDgtLabels: DgtLabel[]
+}
+
+const defaultSortField: SortField = "salesUnits12m"
+const defaultSortDirection: SortDirection = "desc"
 const defaultViewMode: ViewMode = "cards"
+const defaultResultsLimit: ResultsLimit = "15"
+const resultsLimitOptions: Array<{ value: ResultsLimit; label: string }> = [
+  { value: "15", label: "15 coches" },
+  { value: "30", label: "30 coches" },
+  { value: "50", label: "50 coches" },
+  { value: "all", label: "Todos" },
+]
 
 const queryParamKeys = {
   query: "q",
@@ -110,6 +140,7 @@ const queryParamKeys = {
   sortDir: "sortDir",
   view: "view",
   columns: "cols",
+  limit: "limit",
 } as const
 
 const powertrainOptions = Object.entries(powertrainLabels) as Array<
@@ -118,8 +149,49 @@ const powertrainOptions = Object.entries(powertrainLabels) as Array<
 const transmissionOptions = Object.entries(transmissionLabels) as Array<
   [TransmissionType, string]
 >
-const dgtLabelOptions = Object.entries(dgtLabelLabels) as Array<[DgtLabel, string]>
-const bodyTypeOptions = Object.entries(bodyTypeLabels) as Array<[BodyType, string]>
+const dgtLabelOptions = Object.entries(dgtLabelLabels) as Array<
+  [DgtLabel, string]
+>
+const bodyTypeOptions = Object.entries(bodyTypeLabels) as Array<
+  [BodyType, string]
+>
+const availablePowertrainOptions = powertrainOptions.filter(([value]) =>
+  carsSpainTopSalesRolling12m.some((car) =>
+    car.versions.some((version) => version.powertrain === value)
+  )
+)
+const availableTransmissionOptions = transmissionOptions.filter(([value]) =>
+  carsSpainTopSalesRolling12m.some((car) =>
+    car.versions.some((version) => version.transmission === value)
+  )
+)
+const availableDgtLabelOptions = dgtLabelOptions.filter(([value]) =>
+  carsSpainTopSalesRolling12m.some((car) =>
+    car.versions.some((version) => version.dgtLabel === value)
+  )
+)
+const availableBodyTypeOptions = bodyTypeOptions.filter(([value]) =>
+  carsSpainTopSalesRolling12m.some((car) => car.bodyType === value)
+)
+const hasLengthData = carsSpainTopSalesRolling12m.some(
+  (car) => typeof car.lengthMm === "number"
+)
+const hasWidthData = carsSpainTopSalesRolling12m.some(
+  (car) => typeof car.widthMm === "number"
+)
+const hasTrunkData = carsSpainTopSalesRolling12m.some(
+  (car) => typeof car.trunkLiters === "number"
+)
+const hasVersionMetadata =
+  availablePowertrainOptions.length > 0 ||
+  availableTransmissionOptions.length > 0 ||
+  availableDgtLabelOptions.length > 0
+const hasExtendedMetadata =
+  hasVersionMetadata ||
+  availableBodyTypeOptions.length > 0 ||
+  hasLengthData ||
+  hasWidthData ||
+  hasTrunkData
 
 const tableColumnDefinitions: Array<{
   key: TableColumnKey
@@ -128,10 +200,9 @@ const tableColumnDefinitions: Array<{
 }> = [
   { key: "photo", label: "Foto" },
   { key: "model", label: "Modelo", sortField: "brandModel" },
-  { key: "salesRank12m", label: "Ranking", sortField: "salesRank12m" },
   {
     key: "salesUnits12m",
-    label: `Matriculaciones ${salesWindowMonths}m`,
+    label: `Ranking ${salesWindowMonths}m`,
     sortField: "salesUnits12m",
   },
   { key: "bodyType", label: "Tipo" },
@@ -146,15 +217,14 @@ const allTableColumns = tableColumnDefinitions.map((column) => column.key)
 
 const defaultVisibleColumns: TableColumnKey[] = [
   "model",
-  "salesRank12m",
   "salesUnits12m",
+  "photo",
   "dgtLabels",
   "transmissions",
   "lengthMm",
   "trunkLiters",
 ]
 const defaultSortDirectionByField: Record<SortField, SortDirection> = {
-  salesRank12m: "asc",
   salesUnits12m: "desc",
   brandModel: "asc",
   lengthMm: "asc",
@@ -162,15 +232,39 @@ const defaultSortDirectionByField: Record<SortField, SortDirection> = {
   trunkLiters: "asc",
 }
 const sortFieldLabels: Record<SortField, string> = {
-  salesRank12m: "Ranking",
-  salesUnits12m: `Matriculaciones ${salesWindowMonths}m`,
+  salesUnits12m: `Ranking ${salesWindowMonths}m`,
   brandModel: "Marca/Modelo",
   lengthMm: "Longitud",
   widthMm: "Anchura",
   trunkLiters: "Maletero",
 }
+const appName = "Rueda"
 
 const integerFormatter = new Intl.NumberFormat("es-ES")
+const naText = "N/D"
+
+function compareOptionalNumber(
+  left: number | undefined,
+  right: number | undefined
+) {
+  if (typeof left === "number" && typeof right === "number") {
+    return left - right
+  }
+  if (typeof left === "number") {
+    return -1
+  }
+  if (typeof right === "number") {
+    return 1
+  }
+  return 0
+}
+
+function formatOptionalNumber(value: number | undefined, suffix: string) {
+  if (typeof value !== "number") {
+    return naText
+  }
+  return `${integerFormatter.format(value)} ${suffix}`
+}
 
 function parseInteger(value: string | null) {
   if (value === null || value.trim() === "") {
@@ -201,7 +295,6 @@ function parseMultiValue<T extends string>(
 
 function parseSortField(value: string | null): SortField {
   const allowedValues = new Set<SortField>([
-    "salesRank12m",
     "salesUnits12m",
     "brandModel",
     "lengthMm",
@@ -232,6 +325,14 @@ function parseViewMode(value: string | null): ViewMode {
   return defaultViewMode
 }
 
+function parseResultsLimit(value: string | null): ResultsLimit {
+  if (value === "15" || value === "30" || value === "50" || value === "all") {
+    return value
+  }
+
+  return defaultResultsLimit
+}
+
 function parseVisibleColumns(value: string | null): TableColumnKey[] {
   if (!value) {
     return defaultVisibleColumns
@@ -241,7 +342,9 @@ function parseVisibleColumns(value: string | null): TableColumnKey[] {
   const selectedColumns = value
     .split(",")
     .map((column) => column.trim())
-    .filter((column): column is TableColumnKey => allowedColumns.has(column as TableColumnKey))
+    .filter((column): column is TableColumnKey =>
+      allowedColumns.has(column as TableColumnKey)
+    )
 
   if (selectedColumns.length === 0) {
     return defaultVisibleColumns
@@ -288,6 +391,7 @@ function parseUrlState(search: string): UrlState {
     sortDirection: parseSortDirection(params.get(queryParamKeys.sortDir)),
     viewMode: parseViewMode(params.get(queryParamKeys.view)),
     visibleColumns: parseVisibleColumns(params.get(queryParamKeys.columns)),
+    resultsLimit: parseResultsLimit(params.get(queryParamKeys.limit)),
   }
 }
 
@@ -338,23 +442,41 @@ function serializeUrlState(state: UrlState): string {
     params.set(queryParamKeys.columns, state.visibleColumns.join(","))
   }
 
+  if (state.resultsLimit !== defaultResultsLimit) {
+    params.set(queryParamKeys.limit, state.resultsLimit)
+  }
+
   return params.toString()
 }
 
-function hasIntersection(values: string[], filters: string[]) {
-  if (filters.length === 0) {
-    return true
-  }
-
-  return filters.some((filterValue) => values.includes(filterValue))
+function uniqueOrdered<T extends string>(values: T[], order: T[]) {
+  const selected = new Set(values)
+  return order.filter((value) => selected.has(value))
 }
 
-function getFilteredValues<T extends string>(values: T[], activeFilters: T[]) {
-  if (activeFilters.length === 0) {
-    return values
+function versionMatchesFilters(version: CarVersion, filters: Filters) {
+  if (
+    filters.powertrains.length > 0 &&
+    !filters.powertrains.includes(version.powertrain)
+  ) {
+    return false
   }
 
-  return values.filter((value) => activeFilters.includes(value))
+  if (
+    filters.transmissions.length > 0 &&
+    !filters.transmissions.includes(version.transmission)
+  ) {
+    return false
+  }
+
+  if (
+    filters.dgtLabels.length > 0 &&
+    !filters.dgtLabels.includes(version.dgtLabel)
+  ) {
+    return false
+  }
+
+  return true
 }
 
 function toggleArrayValue<T extends string>(
@@ -375,6 +497,22 @@ function toggleArrayValue<T extends string>(
   return items
 }
 
+function AppLogo() {
+  return (
+    <div className="relative h-12 w-12 overflow-hidden rounded-2xl border border-white/25 bg-black/20 shadow-lg backdrop-blur-sm">
+      <div className="absolute inset-0 bg-linear-to-br from-cyan-300 via-sky-400 to-emerald-400 opacity-85" />
+      <div className="absolute inset-[3px] rounded-xl bg-slate-950/80" />
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="relative h-7 w-7">
+          <div className="absolute inset-0 rounded-full border-2 border-cyan-200/80" />
+          <div className="absolute inset-[7px] rounded-full bg-cyan-300" />
+          <div className="absolute top-1/2 left-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-950" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const [state, setState] = useState<UrlState>(() =>
     parseUrlState(window.location.search)
@@ -382,7 +520,14 @@ function App() {
   const [isColumnPanelOpen, setIsColumnPanelOpen] = useState(false)
   const [brokenImageIds, setBrokenImageIds] = useState<Set<string>>(new Set())
 
-  const { filters, sortField, sortDirection, viewMode, visibleColumns } = state
+  const {
+    filters,
+    sortField,
+    sortDirection,
+    viewMode,
+    visibleColumns,
+    resultsLimit,
+  } = state
 
   useEffect(() => {
     const handlePopstate = () => {
@@ -416,62 +561,111 @@ function App() {
     window.history.replaceState(null, "", nextUrl)
   }, [state])
 
-  const filteredCars = useMemo(() => {
+  const filteredCars = useMemo<CarWithVisibleVersions[]>(() => {
     const normalizedQuery = filters.query.trim().toLowerCase()
+    const powertrainOrder = powertrainOptions.map(([value]) => value)
+    const transmissionOrder = transmissionOptions.map(([value]) => value)
+    const dgtLabelOrder = dgtLabelOptions.map(([value]) => value)
 
-    return carsSpainTopSalesRolling12m.filter((car) => {
-      if (
-        normalizedQuery &&
-        !`${car.brand} ${car.model}`.toLowerCase().includes(normalizedQuery)
-      ) {
-        return false
-      }
+    return carsSpainTopSalesRolling12m
+      .map((car) => {
+        if (
+          normalizedQuery &&
+          !`${car.brand} ${car.model}`.toLowerCase().includes(normalizedQuery)
+        ) {
+          return null
+        }
 
-      if (!hasIntersection(car.powertrains, filters.powertrains)) {
-        return false
-      }
+        if (
+          filters.bodyTypes.length > 0 &&
+          (!car.bodyType || !filters.bodyTypes.includes(car.bodyType))
+        ) {
+          return null
+        }
 
-      if (!hasIntersection(car.transmissions, filters.transmissions)) {
-        return false
-      }
+        if (
+          typeof filters.minLength === "number" &&
+          (typeof car.lengthMm !== "number" || car.lengthMm < filters.minLength)
+        ) {
+          return null
+        }
 
-      if (!hasIntersection(car.dgtLabels, filters.dgtLabels)) {
-        return false
-      }
+        if (
+          typeof filters.maxLength === "number" &&
+          (typeof car.lengthMm !== "number" || car.lengthMm > filters.maxLength)
+        ) {
+          return null
+        }
 
-      if (filters.bodyTypes.length > 0 && !filters.bodyTypes.includes(car.bodyType)) {
-        return false
-      }
+        if (
+          typeof filters.minWidth === "number" &&
+          (typeof car.widthMm !== "number" || car.widthMm < filters.minWidth)
+        ) {
+          return null
+        }
 
-      if (typeof filters.minLength === "number" && car.lengthMm < filters.minLength) {
-        return false
-      }
+        if (
+          typeof filters.maxWidth === "number" &&
+          (typeof car.widthMm !== "number" || car.widthMm > filters.maxWidth)
+        ) {
+          return null
+        }
 
-      if (typeof filters.maxLength === "number" && car.lengthMm > filters.maxLength) {
-        return false
-      }
+        if (
+          typeof filters.minTrunk === "number" &&
+          (typeof car.trunkLiters !== "number" ||
+            car.trunkLiters < filters.minTrunk)
+        ) {
+          return null
+        }
 
-      if (typeof filters.minWidth === "number" && car.widthMm < filters.minWidth) {
-        return false
-      }
+        if (
+          typeof filters.maxTrunk === "number" &&
+          (typeof car.trunkLiters !== "number" ||
+            car.trunkLiters > filters.maxTrunk)
+        ) {
+          return null
+        }
 
-      if (typeof filters.maxWidth === "number" && car.widthMm > filters.maxWidth) {
-        return false
-      }
+        const hasVersionFilters =
+          filters.powertrains.length > 0 ||
+          filters.transmissions.length > 0 ||
+          filters.dgtLabels.length > 0
+        const matchingVersions = car.versions.filter((version) =>
+          versionMatchesFilters(version, filters)
+        )
+        if (car.versions.length === 0 && hasVersionFilters) {
+          return null
+        }
+        if (car.versions.length > 0 && matchingVersions.length === 0) {
+          return null
+        }
 
-      if (typeof filters.minTrunk === "number" && car.trunkLiters < filters.minTrunk) {
-        return false
-      }
+        const visiblePowertrains = uniqueOrdered(
+          matchingVersions.map((version) => version.powertrain),
+          powertrainOrder
+        )
+        const visibleTransmissions = uniqueOrdered(
+          matchingVersions.map((version) => version.transmission),
+          transmissionOrder
+        )
+        const visibleDgtLabels = uniqueOrdered(
+          matchingVersions.map((version) => version.dgtLabel),
+          dgtLabelOrder
+        )
 
-      if (typeof filters.maxTrunk === "number" && car.trunkLiters > filters.maxTrunk) {
-        return false
-      }
-
-      return true
-    })
+        return {
+          ...car,
+          matchingVersions: car.versions.length > 0 ? matchingVersions : [],
+          visiblePowertrains,
+          visibleTransmissions,
+          visibleDgtLabels,
+        }
+      })
+      .filter((car): car is CarWithVisibleVersions => car !== null)
   }, [filters])
 
-  const displayedCars = useMemo(() => {
+  const sortedCars = useMemo(() => {
     const directionMultiplier = sortDirection === "asc" ? 1 : -1
     const nextCars = [...filteredCars]
 
@@ -486,24 +680,20 @@ function App() {
         )
       }
 
-      if (sortField === "salesRank12m") {
-        comparison = carA.salesRank12m - carB.salesRank12m
-      }
-
       if (sortField === "salesUnits12m") {
         comparison = carA.salesUnits12m - carB.salesUnits12m
       }
 
       if (sortField === "lengthMm") {
-        comparison = carA.lengthMm - carB.lengthMm
+        comparison = compareOptionalNumber(carA.lengthMm, carB.lengthMm)
       }
 
       if (sortField === "widthMm") {
-        comparison = carA.widthMm - carB.widthMm
+        comparison = compareOptionalNumber(carA.widthMm, carB.widthMm)
       }
 
       if (sortField === "trunkLiters") {
-        comparison = carA.trunkLiters - carB.trunkLiters
+        comparison = compareOptionalNumber(carA.trunkLiters, carB.trunkLiters)
       }
 
       if (comparison !== 0) {
@@ -515,6 +705,13 @@ function App() {
 
     return nextCars
   }, [filteredCars, sortDirection, sortField])
+  const displayedCars = useMemo(() => {
+    if (resultsLimit === "all") {
+      return sortedCars
+    }
+
+    return sortedCars.slice(0, Number.parseInt(resultsLimit, 10))
+  }, [resultsLimit, sortedCars])
 
   const visibleColumnSet = useMemo(
     () => new Set<TableColumnKey>(visibleColumns),
@@ -522,7 +719,9 @@ function App() {
   )
   const visibleColumnDefinitions = useMemo(
     () =>
-      tableColumnDefinitions.filter((column) => visibleColumnSet.has(column.key)),
+      tableColumnDefinitions.filter((column) =>
+        visibleColumnSet.has(column.key)
+      ),
     [visibleColumnSet]
   )
 
@@ -574,7 +773,10 @@ function App() {
     }))
   }
 
-  const toggleVisibleColumn = (columnKey: TableColumnKey, shouldShow: boolean) => {
+  const toggleVisibleColumn = (
+    columnKey: TableColumnKey,
+    shouldShow: boolean
+  ) => {
     setState((previous) => {
       const nextVisibleColumns = shouldShow
         ? previous.visibleColumns.includes(columnKey)
@@ -627,22 +829,55 @@ function App() {
   }
 
   return (
-    <main className="min-h-svh bg-linear-to-b from-background via-background to-muted/40 px-4 py-8 text-foreground sm:px-6 lg:px-10">
+    <TooltipProvider>
+      <main className="min-h-svh bg-linear-to-b from-background via-background to-muted/40 px-4 py-8 text-foreground sm:px-6 lg:px-10">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <header className="rounded-2xl border bg-card/95 p-6 shadow-sm backdrop-blur-sm">
-          <div className="flex flex-wrap items-start gap-4">
-            <div className="space-y-2">
-              <p className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold tracking-wide text-primary uppercase">
-                <CarFront className="size-3.5" />
-                Mercado espanol
+        <header className="relative overflow-hidden rounded-3xl border border-slate-800 bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 p-6 text-slate-100 shadow-xl sm:p-8">
+          <div className="pointer-events-none absolute -top-20 -left-16 h-56 w-56 rounded-full bg-cyan-500/20 blur-3xl" />
+          <div className="pointer-events-none absolute -right-20 -bottom-24 h-64 w-64 rounded-full bg-emerald-500/15 blur-3xl" />
+
+          <div className="relative z-10 grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <AppLogo />
+                <div>
+                  <p className="text-[10px] font-semibold tracking-[0.28em] text-cyan-200/80 uppercase">
+                    Market Radar
+                  </p>
+                  <h1 className="text-3xl leading-none font-black tracking-tight sm:text-4xl">
+                    {appName}
+                  </h1>
+                </div>
+              </div>
+
+              <p className="max-w-2xl text-sm text-slate-300 sm:text-base">
+                Comparador de coches en Espana con foco en matriculaciones
+                reales. Filtra, ordena y comparte cada vista directamente con la
+                URL.
               </p>
-              <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
-                Comparador de coches en Espana
-              </h1>
-              <p className="max-w-3xl text-sm text-muted-foreground sm:text-base">
-                Filtra, ordena y compara por tabla o tarjetas. Todos los filtros se guardan
-                en la URL para compartir una busqueda exacta.
-              </p>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+                  <CarFront className="size-3.5" />
+                  Mercado espanol
+                </span>
+                <span className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-slate-200">
+                  Ventana: {salesWindowLabel}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid gap-2 text-right text-sm sm:min-w-52">
+              <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                <p className="text-xs text-slate-300">Modelos monitorizados</p>
+                <p className="text-2xl font-bold tracking-tight">
+                  {carsSpainTopSalesRolling12m.length}
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                <p className="text-xs text-slate-300">Datos actualizados</p>
+                <p className="font-semibold">{dataLastUpdated}</p>
+              </div>
             </div>
           </div>
         </header>
@@ -677,7 +912,10 @@ function App() {
                   <Input
                     value={filters.query}
                     onChange={(event) =>
-                      updateFilters((previous) => ({ ...previous, query: event.target.value }))
+                      updateFilters((previous) => ({
+                        ...previous,
+                        query: event.target.value,
+                      }))
                     }
                     placeholder="Ej: Corolla, SUV, Peugeot"
                     className="pr-3 pl-8"
@@ -685,170 +923,214 @@ function App() {
                 </span>
               </label>
 
-              <div className="space-y-2">
-                <p className="font-medium">Tipo de motor</p>
-                <div className="grid gap-2">
-                  {powertrainOptions.map(([value, label]) => (
-                    <label key={value} className="inline-flex items-center gap-2">
-                      <Checkbox
-                        checked={filters.powertrains.includes(value)}
-                        onCheckedChange={(checked) =>
-                          updateFilters((previous) => ({
-                            ...previous,
-                            powertrains: toggleArrayValue(
-                              previous.powertrains,
-                              value,
-                              checked === true
-                            ),
-                          }))
-                        }
-                      />
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="font-medium">Cambio</p>
-                <div className="grid gap-2">
-                  {transmissionOptions.map(([value, label]) => (
-                    <label key={value} className="inline-flex items-center gap-2">
-                      <Checkbox
-                        checked={filters.transmissions.includes(value)}
-                        onCheckedChange={(checked) =>
-                          updateFilters((previous) => ({
-                            ...previous,
-                            transmissions: toggleArrayValue(
-                              previous.transmissions,
-                              value,
-                              checked === true
-                            ),
-                          }))
-                        }
-                      />
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="font-medium">Etiqueta ambiental</p>
-                <div className="grid gap-2">
-                  {dgtLabelOptions.map(([value, label]) => (
-                    <label key={value} className="inline-flex items-center gap-2">
-                      <Checkbox
-                        checked={filters.dgtLabels.includes(value)}
-                        onCheckedChange={(checked) =>
-                          updateFilters((previous) => ({
-                            ...previous,
-                            dgtLabels: toggleArrayValue(
-                              previous.dgtLabels,
-                              value,
-                              checked === true
-                            ),
-                          }))
-                        }
-                      />
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="font-medium">Tipo de carroceria</p>
-                <div className="grid gap-2">
-                  {bodyTypeOptions.map(([value, label]) => (
-                    <label key={value} className="inline-flex items-center gap-2">
-                      <Checkbox
-                        checked={filters.bodyTypes.includes(value)}
-                        onCheckedChange={(checked) =>
-                          updateFilters((previous) => ({
-                            ...previous,
-                            bodyTypes: toggleArrayValue(
-                              previous.bodyTypes,
-                              value,
-                              checked === true
-                            ),
-                          }))
-                        }
-                      />
-                      <span>{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="inline-flex items-center gap-2 font-medium">
-                  <Ruler className="size-4" />
-                  Longitud (mm)
+              {!hasExtendedMetadata && (
+                <p className="rounded-md border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
+                  Dataset actual: solo ranking y matriculaciones por modelo.
                 </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    value={filters.minLength ?? ""}
-                    onChange={(event) => updateNumericFilter("minLength", event.target.value)}
-                    placeholder="Min"
-                  />
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    value={filters.maxLength ?? ""}
-                    onChange={(event) => updateNumericFilter("maxLength", event.target.value)}
-                    placeholder="Max"
-                  />
-                </div>
-              </div>
+              )}
 
-              <div className="space-y-2">
-                <p className="inline-flex items-center gap-2 font-medium">
-                  <MoveHorizontal className="size-4" />
-                  Anchura (mm)
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    value={filters.minWidth ?? ""}
-                    onChange={(event) => updateNumericFilter("minWidth", event.target.value)}
-                    placeholder="Min"
-                  />
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    value={filters.maxWidth ?? ""}
-                    onChange={(event) => updateNumericFilter("maxWidth", event.target.value)}
-                    placeholder="Max"
-                  />
+              {availablePowertrainOptions.length > 0 && (
+                <div className="space-y-2">
+                  <p className="font-medium">Tipo de motor</p>
+                  <div className="grid gap-2">
+                    {availablePowertrainOptions.map(([value, label]) => (
+                      <label
+                        key={value}
+                        className="inline-flex items-center gap-2"
+                      >
+                        <Checkbox
+                          checked={filters.powertrains.includes(value)}
+                          onCheckedChange={(checked) =>
+                            updateFilters((previous) => ({
+                              ...previous,
+                              powertrains: toggleArrayValue(
+                                previous.powertrains,
+                                value,
+                                checked === true
+                              ),
+                            }))
+                          }
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="space-y-2">
-                <p className="inline-flex items-center gap-2 font-medium">
-                  <Trees className="size-4" />
-                  Maletero (L)
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    value={filters.minTrunk ?? ""}
-                    onChange={(event) => updateNumericFilter("minTrunk", event.target.value)}
-                    placeholder="Min"
-                  />
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    value={filters.maxTrunk ?? ""}
-                    onChange={(event) => updateNumericFilter("maxTrunk", event.target.value)}
-                    placeholder="Max"
-                  />
+              {availableTransmissionOptions.length > 0 && (
+                <div className="space-y-2">
+                  <p className="font-medium">Cambio</p>
+                  <div className="grid gap-2">
+                    {availableTransmissionOptions.map(([value, label]) => (
+                      <label
+                        key={value}
+                        className="inline-flex items-center gap-2"
+                      >
+                        <Checkbox
+                          checked={filters.transmissions.includes(value)}
+                          onCheckedChange={(checked) =>
+                            updateFilters((previous) => ({
+                              ...previous,
+                              transmissions: toggleArrayValue(
+                                previous.transmissions,
+                                value,
+                                checked === true
+                              ),
+                            }))
+                          }
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {availableDgtLabelOptions.length > 0 && (
+                <div className="space-y-2">
+                  <p className="font-medium">Etiqueta ambiental</p>
+                  <div className="grid gap-2">
+                    {availableDgtLabelOptions.map(([value, label]) => (
+                      <label
+                        key={value}
+                        className="inline-flex items-center gap-2"
+                      >
+                        <Checkbox
+                          checked={filters.dgtLabels.includes(value)}
+                          onCheckedChange={(checked) =>
+                            updateFilters((previous) => ({
+                              ...previous,
+                              dgtLabels: toggleArrayValue(
+                                previous.dgtLabels,
+                                value,
+                                checked === true
+                              ),
+                            }))
+                          }
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {availableBodyTypeOptions.length > 0 && (
+                <div className="space-y-2">
+                  <p className="font-medium">Tipo de carroceria</p>
+                  <div className="grid gap-2">
+                    {availableBodyTypeOptions.map(([value, label]) => (
+                      <label
+                        key={value}
+                        className="inline-flex items-center gap-2"
+                      >
+                        <Checkbox
+                          checked={filters.bodyTypes.includes(value)}
+                          onCheckedChange={(checked) =>
+                            updateFilters((previous) => ({
+                              ...previous,
+                              bodyTypes: toggleArrayValue(
+                                previous.bodyTypes,
+                                value,
+                                checked === true
+                              ),
+                            }))
+                          }
+                        />
+                        <span>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {hasLengthData && (
+                <div className="space-y-2">
+                  <p className="inline-flex items-center gap-2 font-medium">
+                    <Ruler className="size-4" />
+                    Longitud (mm)
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      value={filters.minLength ?? ""}
+                      onChange={(event) =>
+                        updateNumericFilter("minLength", event.target.value)
+                      }
+                      placeholder="Min"
+                    />
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      value={filters.maxLength ?? ""}
+                      onChange={(event) =>
+                        updateNumericFilter("maxLength", event.target.value)
+                      }
+                      placeholder="Max"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {hasWidthData && (
+                <div className="space-y-2">
+                  <p className="inline-flex items-center gap-2 font-medium">
+                    <MoveHorizontal className="size-4" />
+                    Anchura (mm)
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      value={filters.minWidth ?? ""}
+                      onChange={(event) =>
+                        updateNumericFilter("minWidth", event.target.value)
+                      }
+                      placeholder="Min"
+                    />
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      value={filters.maxWidth ?? ""}
+                      onChange={(event) =>
+                        updateNumericFilter("maxWidth", event.target.value)
+                      }
+                      placeholder="Max"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {hasTrunkData && (
+                <div className="space-y-2">
+                  <p className="inline-flex items-center gap-2 font-medium">
+                    <Trees className="size-4" />
+                    Maletero (L)
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      value={filters.minTrunk ?? ""}
+                      onChange={(event) =>
+                        updateNumericFilter("minTrunk", event.target.value)
+                      }
+                      placeholder="Min"
+                    />
+                    <Input
+                      type="number"
+                      inputMode="numeric"
+                      value={filters.maxTrunk ?? ""}
+                      onChange={(event) =>
+                        updateNumericFilter("maxTrunk", event.target.value)
+                      }
+                      placeholder="Max"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </aside>
 
@@ -856,7 +1138,8 @@ function App() {
             <div className="rounded-xl border bg-card px-4 py-3 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-sm text-muted-foreground">
-                  Mostrando <strong>{displayedCars.length}</strong> de {carsSpainTopSalesRolling12m.length} coches
+                  Mostrando <strong>{displayedCars.length}</strong> de{" "}
+                  {sortedCars.length} coches
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Datos actualizados: {dataLastUpdated}
@@ -873,11 +1156,34 @@ function App() {
                     </strong>
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    En tabla: haz click en la cabecera de la columna para ordenar.
+                    En tabla: haz click en la cabecera de la columna para
+                    ordenar.
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Mostrar</span>
+                  <Select
+                    value={resultsLimit}
+                    onValueChange={(value) =>
+                      setState((previous) => ({
+                        ...previous,
+                        resultsLimit: parseResultsLimit(value),
+                      }))
+                    }
+                  >
+                    <SelectTrigger size="sm" className="w-[120px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      {resultsLimitOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
                   <Tabs
                     value={viewMode}
                     onValueChange={(value) =>
@@ -903,7 +1209,9 @@ function App() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setIsColumnPanelOpen((previous) => !previous)}
+                      onClick={() =>
+                        setIsColumnPanelOpen((previous) => !previous)
+                      }
                     >
                       Columnas ({visibleColumns.length})
                     </Button>
@@ -945,7 +1253,9 @@ function App() {
 
             {displayedCars.length === 0 ? (
               <div className="rounded-xl border bg-card p-10 text-center shadow-sm">
-                <p className="text-base font-medium">No hay resultados para esos filtros.</p>
+                <p className="text-base font-medium">
+                  No hay resultados para esos filtros.
+                </p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   Prueba a ampliar rangos o quitar etiquetas, cambios y motores.
                 </p>
@@ -956,7 +1266,7 @@ function App() {
                   <li key={car.id}>
                     <Card className="overflow-hidden py-0 transition hover:-translate-y-0.5 hover:shadow-md">
                       <div className="aspect-16/9 bg-muted">
-                        {brokenImageIds.has(car.id) ? (
+                        {!car.imageUrl || brokenImageIds.has(car.id) ? (
                           <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
                             <ImageOff className="size-4" />
                             Imagen no disponible
@@ -973,16 +1283,21 @@ function App() {
                       </div>
 
                       <CardContent className="p-4">
-                        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                          #{car.salesRank12m} en {salesWindowLabel} · {integerFormatter.format(car.salesUnits12m)} matriculaciones
+                        <p className="text-xs font-medium text-muted-foreground">
+                          {integerFormatter.format(car.salesUnits12m)}{" "}
+                          matriculaciones ({salesWindowMonths}m)
                         </p>
                         <h3 className="mt-1 text-lg font-semibold">
                           {car.brand} {car.model}
                         </h3>
 
                         <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
-                          <Badge variant="secondary">{bodyTypeLabels[car.bodyType]}</Badge>
-                          {car.dgtLabels.map((label) => (
+                          <Badge variant="secondary">
+                            {car.bodyType
+                              ? bodyTypeLabels[car.bodyType]
+                              : "Tipo N/D"}
+                          </Badge>
+                          {car.visibleDgtLabels.map((label) => (
                             <Badge
                               key={label}
                               className="bg-emerald-100 font-medium text-emerald-900"
@@ -994,39 +1309,67 @@ function App() {
 
                         <dl className="mt-4 grid grid-cols-3 gap-3 text-sm">
                           <div>
-                            <dt className="text-xs text-muted-foreground">Longitud</dt>
-                            <dd className="font-medium">{integerFormatter.format(car.lengthMm)} mm</dd>
+                            <dt className="text-xs text-muted-foreground">
+                              Longitud
+                            </dt>
+                            <dd className="font-medium">
+                              {formatOptionalNumber(car.lengthMm, "mm")}
+                            </dd>
                           </div>
                           <div>
-                            <dt className="text-xs text-muted-foreground">Anchura</dt>
-                            <dd className="font-medium">{integerFormatter.format(car.widthMm)} mm</dd>
+                            <dt className="text-xs text-muted-foreground">
+                              Anchura
+                            </dt>
+                            <dd className="font-medium">
+                              {formatOptionalNumber(car.widthMm, "mm")}
+                            </dd>
                           </div>
                           <div>
-                            <dt className="text-xs text-muted-foreground">Maletero</dt>
-                            <dd className="font-medium">{integerFormatter.format(car.trunkLiters)} L</dd>
+                            <dt className="text-xs text-muted-foreground">
+                              Maletero
+                            </dt>
+                            <dd className="font-medium">
+                              {formatOptionalNumber(car.trunkLiters, "L")}
+                            </dd>
                           </div>
                         </dl>
 
                         <div className="mt-4 space-y-2">
                           <div>
-                            <p className="text-xs text-muted-foreground">Motores disponibles</p>
+                            <p className="text-xs text-muted-foreground">
+                              Motores disponibles
+                            </p>
                             <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
-                              {car.powertrains.map((powertrain) => (
-                                <Badge key={powertrain} variant="outline">
-                                  {powertrainLabels[powertrain]}
-                                </Badge>
-                              ))}
+                              {car.visiblePowertrains.length > 0 ? (
+                                car.visiblePowertrains.map((powertrain) => (
+                                  <Badge key={powertrain} variant="outline">
+                                    {powertrainLabels[powertrain]}
+                                  </Badge>
+                                ))
+                              ) : (
+                                <span className="text-muted-foreground">
+                                  {naText}
+                                </span>
+                              )}
                             </div>
                           </div>
 
                           <div>
-                            <p className="text-xs text-muted-foreground">Cambios disponibles</p>
+                            <p className="text-xs text-muted-foreground">
+                              Cambios disponibles
+                            </p>
                             <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
-                              {car.transmissions.map((transmission) => (
-                                <Badge key={transmission} variant="outline">
-                                  {transmissionLabels[transmission]}
-                                </Badge>
-                              ))}
+                              {car.visibleTransmissions.length > 0 ? (
+                                car.visibleTransmissions.map((transmission) => (
+                                  <Badge key={transmission} variant="outline">
+                                    {transmissionLabels[transmission]}
+                                  </Badge>
+                                ))
+                              ) : (
+                                <span className="text-muted-foreground">
+                                  {naText}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -1041,7 +1384,10 @@ function App() {
                   <TableHeader className="bg-muted/60">
                     <TableRow>
                       {visibleColumnDefinitions.map((column) => (
-                        <TableHead key={column.key} className="h-11 bg-muted/60">
+                        <TableHead
+                          key={column.key}
+                          className="h-11 bg-muted/60"
+                        >
                           {column.sortField ? (
                             <Button
                               variant="ghost"
@@ -1049,7 +1395,41 @@ function App() {
                               className="-ml-2 h-8 px-2 text-xs font-semibold"
                               onClick={() => sortByColumn(column.sortField!)}
                             >
-                              {column.label}
+                              <span className="inline-flex items-center gap-1.5">
+                                {column.label}
+                                {column.key === "salesUnits12m" ? (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span
+                                        className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground/80 hover:text-foreground"
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-label="Info sobre Ranking 12m"
+                                        onClick={(event) => {
+                                          event.preventDefault()
+                                          event.stopPropagation()
+                                        }}
+                                        onKeyDown={(event) => {
+                                          if (
+                                            event.key === "Enter" ||
+                                            event.key === " "
+                                          ) {
+                                            event.preventDefault()
+                                            event.stopPropagation()
+                                          }
+                                        }}
+                                      >
+                                        <Info className="size-3.5" />
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-64 text-xs leading-relaxed">
+                                      Total de matriculaciones acumuladas por modelo en los
+                                      ultimos {salesWindowMonths} meses completos
+                                      ({salesWindowLabel}).
+                                    </TooltipContent>
+                                  </Tooltip>
+                                ) : null}
+                              </span>
                               {sortField === column.sortField ? (
                                 sortDirection === "asc" ? (
                                   <ArrowUp className="size-3.5" />
@@ -1071,24 +1451,12 @@ function App() {
                     {displayedCars.map((car) => (
                       <TableRow key={car.id}>
                         {visibleColumnDefinitions.map((column) => {
-                          const filteredDgtLabels = getFilteredValues(
-                            car.dgtLabels,
-                            filters.dgtLabels
-                          )
-                          const filteredTransmissions = getFilteredValues(
-                            car.transmissions,
-                            filters.transmissions
-                          )
-                          const filteredPowertrains = getFilteredValues(
-                            car.powertrains,
-                            filters.powertrains
-                          )
-
                           if (column.key === "photo") {
                             return (
                               <TableCell key={column.key}>
                                 <div className="h-16 w-28 overflow-hidden rounded-md border bg-muted">
-                                  {brokenImageIds.has(car.id) ? (
+                                  {!car.imageUrl ||
+                                  brokenImageIds.has(car.id) ? (
                                     <div className="flex h-full items-center justify-center text-muted-foreground">
                                       <ImageOff className="size-4" />
                                     </div>
@@ -1108,18 +1476,17 @@ function App() {
 
                           if (column.key === "model") {
                             return (
-                              <TableCell key={column.key} className="max-w-56 font-medium">
+                              <TableCell
+                                key={column.key}
+                                className="max-w-56 font-medium"
+                              >
                                 {car.brand} {car.model}
                                 <p className="text-xs text-muted-foreground">
-                                  {bodyTypeLabels[car.bodyType]}
+                                  {car.bodyType
+                                    ? bodyTypeLabels[car.bodyType]
+                                    : "Tipo N/D"}
                                 </p>
                               </TableCell>
-                            )
-                          }
-
-                          if (column.key === "salesRank12m") {
-                            return (
-                              <TableCell key={column.key}>#{car.salesRank12m}</TableCell>
                             )
                           }
 
@@ -1134,7 +1501,9 @@ function App() {
                           if (column.key === "bodyType") {
                             return (
                               <TableCell key={column.key}>
-                                {bodyTypeLabels[car.bodyType]}
+                                {car.bodyType
+                                  ? bodyTypeLabels[car.bodyType]
+                                  : naText}
                               </TableCell>
                             )
                           }
@@ -1144,9 +1513,9 @@ function App() {
                               <TableCell
                                 key={column.key}
                                 className="max-w-36 overflow-hidden text-ellipsis whitespace-nowrap"
-                                title={filteredDgtLabels.join(", ")}
+                                title={car.visibleDgtLabels.join(", ")}
                               >
-                                {filteredDgtLabels.join(", ")}
+                                {car.visibleDgtLabels.join(", ") || naText}
                               </TableCell>
                             )
                           }
@@ -1156,13 +1525,13 @@ function App() {
                               <TableCell
                                 key={column.key}
                                 className="max-w-44 overflow-hidden text-ellipsis whitespace-nowrap"
-                                title={filteredTransmissions
+                                title={car.visibleTransmissions
                                   .map((item) => transmissionLabels[item])
                                   .join(", ")}
                               >
-                                {filteredTransmissions
+                                {car.visibleTransmissions
                                   .map((item) => transmissionLabels[item])
-                                  .join(", ")}
+                                  .join(", ") || naText}
                               </TableCell>
                             )
                           }
@@ -1172,13 +1541,13 @@ function App() {
                               <TableCell
                                 key={column.key}
                                 className="max-w-64 overflow-hidden text-ellipsis whitespace-nowrap"
-                                title={filteredPowertrains
+                                title={car.visiblePowertrains
                                   .map((item) => powertrainLabels[item])
                                   .join(", ")}
                               >
-                                {filteredPowertrains
+                                {car.visiblePowertrains
                                   .map((item) => powertrainLabels[item])
-                                  .join(", ")}
+                                  .join(", ") || naText}
                               </TableCell>
                             )
                           }
@@ -1186,7 +1555,7 @@ function App() {
                           if (column.key === "lengthMm") {
                             return (
                               <TableCell key={column.key}>
-                                {integerFormatter.format(car.lengthMm)} mm
+                                {formatOptionalNumber(car.lengthMm, "mm")}
                               </TableCell>
                             )
                           }
@@ -1194,14 +1563,14 @@ function App() {
                           if (column.key === "widthMm") {
                             return (
                               <TableCell key={column.key}>
-                                {integerFormatter.format(car.widthMm)} mm
+                                {formatOptionalNumber(car.widthMm, "mm")}
                               </TableCell>
                             )
                           }
 
                           return (
                             <TableCell key={column.key}>
-                              {integerFormatter.format(car.trunkLiters)} L
+                              {formatOptionalNumber(car.trunkLiters, "L")}
                             </TableCell>
                           )
                         })}
@@ -1226,42 +1595,27 @@ function App() {
                 ,
                 <a
                   className="ml-1 underline"
-                  href={dataSources.dimensionsAndPowertrains.url}
+                  href={dataSources.modelMetadata.url}
                   target="_blank"
                   rel="noreferrer"
                 >
-                  {dataSources.dimensionsAndPowertrains.title}
-                </a>
-                ,
-                <a
-                  className="ml-1 underline"
-                  href={dataSources.dgtCriteria.url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {dataSources.dgtCriteria.title}
-                </a>
-                ,
-                <a
-                  className="ml-1 underline"
-                  href={dataSources.images.url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {dataSources.images.title}
+                  {dataSources.modelMetadata.title}
                 </a>
                 .
               </p>
               <p className="mt-1">
-                Nota: la etiqueta ambiental se calcula por versiones disponibles del modelo,
-                segun criterios DGT. Las matriculaciones se agregan sobre los ultimos {salesWindowMonths} meses
-                disponibles ({salesWindowLabel}) para categoria M1. Imagenes enlazadas desde Wikimedia.
+                Nota: las matriculaciones se agregan sobre los ultimos{" "}
+                {salesWindowMonths} meses disponibles ({salesWindowLabel}) para
+                categoria M1. Los metadatos tecnicos se completan desde un cache
+                local (actualmente para los 20 modelos mas vendidos); el resto
+                se muestra como {naText}.
               </p>
             </footer>
           </div>
         </section>
       </div>
-    </main>
+      </main>
+    </TooltipProvider>
   )
 }
 

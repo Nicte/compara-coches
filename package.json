@@ -10,9 +10,10 @@
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "data:download-dgt": "python3 scripts/dgt_matriculaciones.py --dataset monthly --start-month 2024-01 --download --download-missing-only --no-metadata --out-dir data/dgt",
+    "data:download-dgt": "python3 scripts/dgt_matriculaciones.py --dataset monthly --latest-months 12 --download --download-missing-only --no-metadata --prune-out-dir --out-dir data/dgt",
     "data:build-rolling-sales": "python3 scripts/build_sales_rolling_12m.py",
-    "data:update-rolling-sales": "pnpm run data:download-dgt && pnpm run data:build-rolling-sales"
+    "data:update-rolling-sales": "pnpm run data:download-dgt && pnpm run data:build-rolling-sales",
+    "data:fetch-missing-metadata": "python3 scripts/fetch_car_metadata.py"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.17",

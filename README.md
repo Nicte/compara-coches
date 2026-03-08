@@ -14,7 +14,7 @@ The ranking data comes from official DGT monthly microdata, replacing static scr
 - Sales ranking for the app is generated from those ZIP files into `src/data/sales-rolling-12m.ts`.
 - `src/data/cars-es.ts` combines:
   - generated rolling sales/rank values,
-  - curated model metadata (dimensions, powertrains, labels, image URLs).
+  - cached model metadata from `src/data/car-metadata.ts` (currently filled for top 20 models).
 
 The app currently aggregates registrations for vehicle category `M1` over the latest 12 available monthly files.
 
@@ -33,13 +33,13 @@ pnpm build
 
 ## Update official data (incremental)
 
-Download only missing monthly files from Jan 2024 onward, then regenerate rolling 12-month ranking:
+Download only missing monthly files for the latest 12-month window (and prune older local files), then regenerate rolling ranking:
 
 ```bash
 pnpm run data:update-rolling-sales
 ```
 
-This command does not re-download files that already exist in `data/dgt/monthly`.
+This command does not re-download files that already exist in `data/dgt/monthly` for the current 12-month window.
 
 ### Individual data commands
 
@@ -58,12 +58,14 @@ pnpm run data:build-rolling-sales
 ## Main files
 
 - `scripts/dgt_matriculaciones.py`: DGT listing fetch + downloader (supports missing-only mode).
-- `scripts/build_sales_rolling_12m.py`: generates rolling sales/rank map from local monthly ZIP files.
+- `scripts/build_sales_rolling_12m.py`: generates rolling sales/rank map from local monthly ZIP files and keeps official Top 100 models with a 1000-unit floor.
 - `src/data/sales-rolling-12m.ts`: generated rolling sales dataset used by the UI.
+- `src/data/car-metadata.ts`: persistent metadata cache keyed by model id (dimensions, labels, versions, image).
 - `src/data/cars-es.ts`: app car catalog + data source metadata.
 - `src/App.tsx`: filters, sorting, cards/table views.
 
 ## Notes
 
 - The rolling window updates automatically when a new monthly DGT file appears and you run `pnpm run data:update-rolling-sales`.
-- Older monthly files are assumed stable; update flow is optimized to fetch only missing files.
+- Older local monthly files are pruned automatically to keep only the latest 12 monthly ZIPs.
+- When a new model appears without cached metadata, it still shows in the ranking with `N/D` fields; add that model to `src/data/car-metadata.ts` when you want to enrich it.

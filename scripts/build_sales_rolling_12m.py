@@ -104,7 +104,42 @@ def label_month_es(month: str) -> str:
     return f"{MONTH_LABELS_ES[month_num]} {year}"
 
 
-def compute_sales(monthly_files: list[tuple[str, Path]], window_months: int) -> tuple[str, str, Counter[str]]:
+def make_model_id(brand: str, model: str, used_ids: set[str]) -> str:
+    raw = f"{brand}-{model}".lower()
+    candidate = re.sub(r"[^a-z0-9]+", "-", raw).strip("-")
+    if not candidate:
+        candidate = "model"
+    base = candidate
+    suffix = 2
+    while candidate in used_ids:
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    used_ids.add(candidate)
+    return candidate
+
+
+def select_top_models(
+    official_counts: Counter[tuple[str, str]],
+    top_n: int,
+    min_units: int,
+) -> list[tuple[str, str, int]]:
+    selected = [
+        (brand, model, units)
+        for (brand, model), units in official_counts.items()
+        if units >= min_units
+    ]
+    selected.sort(key=lambda item: (-item[2], item[0], item[1]))
+    return selected[:top_n]
+
+
+def ts_string(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def compute_sales(
+    monthly_files: list[tuple[str, Path]],
+    window_months: int,
+) -> tuple[str, str, Counter[str], Counter[tuple[str, str]]]:
     if len(monthly_files) < window_months:
         raise RuntimeError(
             f"Need at least {window_months} monthly files in {monthly_files[0][1].parent} "
@@ -115,7 +150,8 @@ def compute_sales(monthly_files: list[tuple[str, Path]], window_months: int) -> 
     start_month = selected[0][0]
     end_month = selected[-1][0]
 
-    counts: Counter[str] = Counter()
+    curated_counts: Counter[str] = Counter()
+    official_counts: Counter[tuple[str, str]] = Counter()
     for _, path in selected:
         with zipfile.ZipFile(path) as archive:
             txt_name = archive.namelist()[0]
@@ -131,13 +167,17 @@ def compute_sales(monthly_files: list[tuple[str, Path]], window_months: int) -> 
 
             brand = normalize(line[17:47])
             model = normalize(line[47:69])
+            if not brand or not model:
+                continue
+
+            official_counts[(brand, model)] += 1
 
             for rule in CAR_RULES:
                 if brand == rule.brand and eval_predicate(rule.model_predicate, model):
-                    counts[rule.car_id] += 1
+                    curated_counts[rule.car_id] += 1
                     break
 
-    return start_month, end_month, counts
+    return start_month, end_month, curated_counts, official_counts
 
 
 def write_output(
@@ -145,10 +185,13 @@ def write_output(
     start_month: str,
     end_month: str,
     window_months: int,
-    counts: Counter[str],
+    curated_counts: Counter[str],
+    top_models: list[tuple[str, str, int]],
+    top_n: int,
+    min_units: int,
 ) -> None:
     ranking = sorted(
-        [(rule.car_id, counts.get(rule.car_id, 0)) for rule in CAR_RULES],
+        [(rule.car_id, curated_counts.get(rule.car_id, 0)) for rule in CAR_RULES],
         key=lambda item: item[1],
         reverse=True,
     )
@@ -162,16 +205,31 @@ def write_output(
     lines.append(f'export const rollingSalesStartMonth = "{start_month}" as const')
     lines.append(f'export const rollingSalesEndMonth = "{end_month}" as const')
     lines.append(f'export const rollingSalesLabel = "{label_month_es(start_month)} - {label_month_es(end_month)}" as const')
+    lines.append(f"export const rollingSalesTopNRequested = {top_n} as const")
+    lines.append(f"export const rollingSalesMinUnits = {min_units} as const")
     lines.append("")
     lines.append("export const rollingSalesUnitsByCarId = {")
     for car_id, _ in ranking:
-        lines.append(f'  "{car_id}": {counts.get(car_id, 0)},')
+        lines.append(f'  "{car_id}": {curated_counts.get(car_id, 0)},')
     lines.append("} as const")
     lines.append("")
     lines.append("export const rollingSalesRankByCarId = {")
     for car_id, _ in ranking:
         lines.append(f'  "{car_id}": {ranks[car_id]},')
     lines.append("} as const")
+    lines.append("")
+    lines.append("export const rollingSalesTopModels = [")
+    used_ids: set[str] = set()
+    for index, (brand, model, units) in enumerate(top_models, start=1):
+        model_id = make_model_id(brand, model, used_ids)
+        lines.append("  {")
+        lines.append(f'    id: "{model_id}",')
+        lines.append(f'    brand: "{ts_string(brand)}",')
+        lines.append(f'    model: "{ts_string(model)}",')
+        lines.append(f"    salesRank12m: {index},")
+        lines.append(f"    salesUnits12m: {units},")
+        lines.append("  },")
+    lines.append("] as const")
     lines.append("")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -195,6 +253,18 @@ def main() -> int:
         help="Rolling window size in months.",
     )
     parser.add_argument(
+        "--top-n",
+        type=int,
+        default=100,
+        help="Number of official models to keep in rollingSalesTopModels.",
+    )
+    parser.add_argument(
+        "--min-units",
+        type=int,
+        default=1000,
+        help="Minimum 12-month registrations to include in rollingSalesTopModels.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=Path("src/data/sales-rolling-12m.ts"),
@@ -206,12 +276,32 @@ def main() -> int:
     if not monthly_files:
         raise RuntimeError(f"No monthly ZIP files found in {args.monthly_dir}")
 
-    start_month, end_month, counts = compute_sales(monthly_files, args.window_months)
-    write_output(args.output, start_month, end_month, args.window_months, counts)
+    start_month, end_month, curated_counts, official_counts = compute_sales(
+        monthly_files, args.window_months
+    )
+    top_models = select_top_models(
+        official_counts,
+        top_n=args.top_n,
+        min_units=args.min_units,
+    )
+    write_output(
+        args.output,
+        start_month,
+        end_month,
+        args.window_months,
+        curated_counts,
+        top_models,
+        args.top_n,
+        args.min_units,
+    )
 
     print("Generated rolling sales data")
     print(f"- Months: {start_month} to {end_month} ({args.window_months} months)")
-    for index, (car_id, units) in enumerate(counts.most_common(), start=1):
+    print(
+        f"- Official top models kept: {len(top_models)} "
+        f"(top_n={args.top_n}, min_units={args.min_units})"
+    )
+    for index, (car_id, units) in enumerate(curated_counts.most_common(), start=1):
         print(f"  {index:2d}. {car_id:20s} {units}")
 
     return 0

@@ -126,6 +126,24 @@ def filter_entries_by_date(
     return out
 
 
+def keep_latest_monthly_entries(entries: list[DatasetEntry], latest_months: int) -> list[DatasetEntry]:
+    if latest_months <= 0:
+        return entries
+
+    monthly = [entry for entry in entries if entry.dataset == "monthly" and entry.file_date]
+    monthly.sort(key=lambda entry: entry.file_date)
+    keep_monthly_filenames = {entry.filename for entry in monthly[-latest_months:]}
+
+    out: list[DatasetEntry] = []
+    for entry in entries:
+        if entry.dataset == "monthly":
+            if entry.filename in keep_monthly_filenames:
+                out.append(entry)
+        else:
+            out.append(entry)
+    return out
+
+
 def parse_content_length(value: str | None) -> int | None:
     if not value:
         return None
@@ -250,6 +268,25 @@ def filter_missing_entries(entries: list[DatasetEntry], out_dir: Path) -> list[D
     return [entry for entry in entries if not destination_path(entry, out_dir).exists()]
 
 
+def prune_local_files(entries: list[DatasetEntry], out_dir: Path, datasets: set[str]) -> int:
+    removed = 0
+    selected_by_dataset: dict[str, set[str]] = {}
+    for dataset in datasets:
+        selected_by_dataset[dataset] = {
+            destination_path(entry, out_dir).name for entry in entries if entry.dataset == dataset
+        }
+
+    for dataset in datasets:
+        dataset_dir = out_dir / dataset
+        if not dataset_dir.exists():
+            continue
+        for path in dataset_dir.glob("*.zip"):
+            if path.name not in selected_by_dataset[dataset]:
+                path.unlink()
+                removed += 1
+    return removed
+
+
 def download_entries(entries: list[DatasetEntry], out_dir: Path, overwrite: bool = False) -> None:
     for entry in entries:
         if entry.status != "ok":
@@ -309,6 +346,12 @@ def main() -> int:
     parser.add_argument("--end-month", help="Filter monthly files to YYYY-MM (inclusive).")
     parser.add_argument("--start-day", help="Filter daily files from YYYY-MM-DD (inclusive).")
     parser.add_argument("--end-day", help="Filter daily files to YYYY-MM-DD (inclusive).")
+    parser.add_argument(
+        "--latest-months",
+        type=int,
+        default=0,
+        help="Keep only latest N monthly files from source list after other filters.",
+    )
     parser.add_argument("--manifest", type=Path, default=Path("data/dgt/manifest.csv"))
     parser.add_argument("--download", action="store_true", help="Download ZIP files after metadata collection.")
     parser.add_argument(
@@ -320,6 +363,11 @@ def main() -> int:
         "--no-metadata",
         action="store_true",
         help="Skip HTTP metadata (HEAD/Range) and manifest generation.",
+    )
+    parser.add_argument(
+        "--prune-out-dir",
+        action="store_true",
+        help="Delete local ZIP files not selected by current filters (for selected dataset(s)).",
     )
     parser.add_argument("--out-dir", type=Path, default=Path("data/dgt"))
     parser.add_argument("--overwrite", action="store_true")
@@ -333,8 +381,14 @@ def main() -> int:
         start_day=args.start_day,
         end_day=args.end_day,
     )
+    entries = keep_latest_monthly_entries(entries, args.latest_months)
     if args.limit > 0:
         entries = entries[: args.limit]
+
+    if args.prune_out_dir:
+        datasets_to_prune = {entry.dataset for entry in entries}
+        pruned = prune_local_files(entries, args.out_dir, datasets_to_prune)
+        print(f"Pruned local files: {pruned}")
 
     download_entries_list = entries
     if args.download and args.download_missing_only and not args.overwrite:

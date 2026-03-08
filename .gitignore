@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Optional DGT helper outputs not used by the app runtime
+data/dgt/manifest*.csv
+data/dgt_test/
