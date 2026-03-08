@@ -69,3 +69,7 @@ pnpm run data:build-rolling-sales
 - The rolling window updates automatically when a new monthly DGT file appears and you run `pnpm run data:update-rolling-sales`.
 - Older local monthly files are pruned automatically to keep only the latest 12 monthly ZIPs.
 - When a new model appears without cached metadata, it still shows in the ranking with `N/D` fields; add that model to `src/data/car-metadata.ts` when you want to enrich it.
+
+## TODO
+
+- [ ] Review design notes and architecture documentation in `/docs` folder
