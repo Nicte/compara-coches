@@ -1039,6 +1039,16 @@ function App() {
     })
   }
 
+  const getDgtLabelIcon = (label: DgtLabel): string => {
+    const labelMap: Record<DgtLabel, string> = {
+      B: "/car-data/dgt-label-b.svg",
+      C: "/car-data/dgt-label-c.svg",
+      ECO: "/car-data/dgt-label-eco.svg",
+      CERO: "/car-data/dgt-label-cero.svg",
+    }
+    return labelMap[label]
+  }
+
   return (
     <TooltipProvider>
       <main className="min-h-svh bg-linear-to-b from-background via-background to-muted/40 px-4 py-8 text-foreground sm:px-6 lg:px-10">
@@ -1768,12 +1778,13 @@ function App() {
                                 : "Tipo N/D"}
                             </Badge>
                             {car.visibleDgtLabels.map((label) => (
-                              <Badge
+                              <img
                                 key={label}
-                                className="bg-emerald-100 font-medium text-emerald-900"
-                              >
-                                {label}
-                              </Badge>
+                                src={getDgtLabelIcon(label)}
+                                alt={dgtLabelLabels[label]}
+                                title={dgtLabelLabels[label]}
+                                className="h-7 w-7"
+                              />
                             ))}
                           </div>
 
@@ -1990,10 +2001,23 @@ function App() {
                               return (
                                 <TableCell
                                   key={column.key}
-                                  className="max-w-36 overflow-hidden text-ellipsis whitespace-nowrap"
-                                  title={car.visibleDgtLabels.join(", ")}
+                                  className="max-w-36"
                                 >
-                                  {car.visibleDgtLabels.join(", ") || naText}
+                                  <div className="flex gap-1.5">
+                                    {car.visibleDgtLabels.length > 0 ? (
+                                      car.visibleDgtLabels.map((label) => (
+                                        <img
+                                          key={label}
+                                          src={getDgtLabelIcon(label)}
+                                          alt={dgtLabelLabels[label]}
+                                          title={dgtLabelLabels[label]}
+                                          className="h-6 w-6"
+                                        />
+                                      ))
+                                    ) : (
+                                      <span className="text-muted-foreground">{naText}</span>
+                                    )}
+                                  </div>
                                 </TableCell>
                               )
                             }
