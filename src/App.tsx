@@ -3,7 +3,6 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  CarFront,
   Filter,
   ImageOff,
   Info,
