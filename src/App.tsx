@@ -2015,7 +2015,9 @@ function App() {
                                         />
                                       ))
                                     ) : (
-                                      <span className="text-muted-foreground">{naText}</span>
+                                      <span className="text-muted-foreground">
+                                        {naText}
+                                      </span>
                                     )}
                                   </div>
                                 </TableCell>
