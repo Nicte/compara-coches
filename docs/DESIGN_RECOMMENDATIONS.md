@@ -21,7 +21,7 @@ Recommendations after exploring the app at http://localhost:5173/ (cards + table
 
 ---
 
-## 3. **Filters sidebar**
+## 3. **Filters sidebar** (Done)
 
 - **What works:** Filters are grouped, “X activos” and “Clear all filters” give feedback; range inputs (Longitud, Anchura, Maletero) are clear.
 - **Recommendations:**

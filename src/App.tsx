@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  ChevronDown,
   Filter,
   ImageOff,
   Info,
@@ -84,6 +85,8 @@ type ResultsLimit = "15" | "30" | "50" | "all"
 
 type Filters = {
   query: string
+  brands: string[]
+  models: string[]
   powertrains: PowertrainType[]
   transmissions: TransmissionType[]
   dgtLabels: DgtLabel[]
@@ -125,6 +128,8 @@ const resultsLimitOptions: Array<{ value: ResultsLimit; label: string }> = [
 
 const queryParamKeys = {
   query: "q",
+  brands: "marca",
+  models: "modelo",
   powertrains: "motor",
   transmissions: "cambio",
   dgtLabels: "etiqueta",
@@ -172,6 +177,25 @@ const availableDgtLabelOptions = dgtLabelOptions.filter(([value]) =>
 const availableBodyTypeOptions = bodyTypeOptions.filter(([value]) =>
   carsSpainTopSalesRolling12m.some((car) => car.bodyType === value)
 )
+
+// Extract unique brands and create brand -> models mapping
+const uniqueBrands = Array.from(
+  new Set(carsSpainTopSalesRolling12m.map((car) => car.brand))
+).sort()
+const modelsByBrand = uniqueBrands.reduce(
+  (acc, brand) => {
+    acc[brand] = Array.from(
+      new Set(
+        carsSpainTopSalesRolling12m
+          .filter((car) => car.brand === brand)
+          .map((car) => car.model)
+      )
+    ).sort()
+    return acc
+  },
+  {} as Record<string, string[]>
+)
+
 const hasLengthData = carsSpainTopSalesRolling12m.some(
   (car) => typeof car.lengthMm === "number"
 )
@@ -359,10 +383,20 @@ function parseUrlState(search: string): UrlState {
   const transmissionSet = new Set(transmissionOptions.map(([value]) => value))
   const dgtLabelSet = new Set(dgtLabelOptions.map(([value]) => value))
   const bodyTypeSet = new Set(bodyTypeOptions.map(([value]) => value))
+  const brandSet = new Set(uniqueBrands)
+  const allModelsSet = new Set(Object.values(modelsByBrand).flat())
 
   return {
     filters: {
       query: params.get(queryParamKeys.query)?.trim() ?? "",
+      brands: parseMultiValue<string>(
+        params.get(queryParamKeys.brands),
+        brandSet
+      ),
+      models: parseMultiValue<string>(
+        params.get(queryParamKeys.models),
+        allModelsSet
+      ),
       powertrains: parseMultiValue<PowertrainType>(
         params.get(queryParamKeys.powertrains),
         powertrainSet
@@ -413,6 +447,8 @@ function serializeUrlState(state: UrlState): string {
     params.set(queryParamKeys.query, state.filters.query.trim())
   }
 
+  setMultiValue(queryParamKeys.brands, state.filters.brands)
+  setMultiValue(queryParamKeys.models, state.filters.models)
   setMultiValue(queryParamKeys.powertrains, state.filters.powertrains)
   setMultiValue(queryParamKeys.transmissions, state.filters.transmissions)
   setMultiValue(queryParamKeys.dgtLabels, state.filters.dgtLabels)
@@ -496,6 +532,19 @@ function toggleArrayValue<T extends string>(
   return items
 }
 
+function toggleSection(
+  sections: Set<string>,
+  sectionId: string
+): Set<string> {
+  const newSections = new Set(sections)
+  if (newSections.has(sectionId)) {
+    newSections.delete(sectionId)
+  } else {
+    newSections.add(sectionId)
+  }
+  return newSections
+}
+
 function AppLogo() {
   return (
     <div className="relative h-12 w-12 overflow-hidden rounded-2xl border border-white/25 bg-black/20 shadow-lg backdrop-blur-sm">
@@ -517,9 +566,30 @@ function AppLogo() {
             className="text-cyan-200"
           />
           {/* Data bars */}
-          <rect x="16" y="10" width="1.5" height="4" fill="currentColor" className="text-emerald-300" />
-          <rect x="18.5" y="8" width="1.5" height="6" fill="currentColor" className="text-emerald-400" />
-          <rect x="21" y="6" width="1.5" height="8" fill="currentColor" className="text-emerald-300" />
+          <rect
+            x="16"
+            y="10"
+            width="1.5"
+            height="4"
+            fill="currentColor"
+            className="text-emerald-300"
+          />
+          <rect
+            x="18.5"
+            y="8"
+            width="1.5"
+            height="6"
+            fill="currentColor"
+            className="text-emerald-400"
+          />
+          <rect
+            x="21"
+            y="6"
+            width="1.5"
+            height="8"
+            fill="currentColor"
+            className="text-emerald-300"
+          />
         </svg>
       </div>
     </div>
@@ -532,6 +602,9 @@ function App() {
   )
   const [isColumnPanelOpen, setIsColumnPanelOpen] = useState(false)
   const [brokenImageIds, setBrokenImageIds] = useState<Set<string>>(new Set())
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(
+    new Set(["marca", "motor", "cambio", "etiqueta", "carroceria"])
+  )
 
   const {
     filters,
@@ -585,6 +658,20 @@ function App() {
         if (
           normalizedQuery &&
           !`${car.brand} ${car.model}`.toLowerCase().includes(normalizedQuery)
+        ) {
+          return null
+        }
+
+        if (
+          filters.brands.length > 0 &&
+          !filters.brands.includes(car.brand)
+        ) {
+          return null
+        }
+
+        if (
+          filters.models.length > 0 &&
+          !filters.models.includes(car.model)
         ) {
           return null
         }
@@ -739,6 +826,8 @@ function App() {
   )
 
   const activeFiltersCount =
+    filters.brands.length +
+    filters.models.length +
     filters.powertrains.length +
     filters.transmissions.length +
     filters.dgtLabels.length +
@@ -761,6 +850,8 @@ function App() {
   const resetFilters = () => {
     updateFilters(() => ({
       query: "",
+      brands: [],
+      models: [],
       powertrains: [],
       transmissions: [],
       dgtLabels: [],
@@ -844,779 +935,937 @@ function App() {
   return (
     <TooltipProvider>
       <main className="min-h-svh bg-linear-to-b from-background via-background to-muted/40 px-4 py-8 text-foreground sm:px-6 lg:px-10">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
-        <header className="relative overflow-hidden rounded-3xl border border-slate-800 bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 p-6 text-slate-100 shadow-xl sm:p-8">
-          <div className="pointer-events-none absolute -top-20 -left-16 h-56 w-56 rounded-full bg-cyan-500/20 blur-3xl" />
-          <div className="pointer-events-none absolute -right-20 -bottom-24 h-64 w-64 rounded-full bg-emerald-500/15 blur-3xl" />
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-6">
+          <header className="relative overflow-hidden rounded-3xl border border-slate-800 bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 p-6 text-slate-100 shadow-xl sm:p-8">
+            <div className="pointer-events-none absolute -top-20 -left-16 h-56 w-56 rounded-full bg-cyan-500/20 blur-3xl" />
+            <div className="pointer-events-none absolute -right-20 -bottom-24 h-64 w-64 rounded-full bg-emerald-500/15 blur-3xl" />
 
-          <div className="relative z-10 grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
-            <div className="space-y-4">
-              <div className="flex items-center gap-4">
-                <AppLogo />
-                <div>
-                  <h1 className="text-3xl leading-none font-black tracking-tight sm:text-4xl">
-                    {appName}
-                  </h1>
-                  <p className="text-xs font-medium tracking-wide text-slate-400 mt-2">
-                    Menos humo, más datos
-                  </p>
-                </div>
-              </div>
-
-              <p className="max-w-2xl text-sm text-slate-400 sm:text-base">
-                Comparador de coches en Espana con foco en matriculaciones
-                reales. Filtra, ordena y comparte cada vista directamente con la
-                URL.
-              </p>
-            </div>
-
-            <div className="grid gap-2 text-right text-sm sm:min-w-52">
-              <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-                <p className="text-xs text-slate-300">Modelos monitorizados</p>
-                <p className="text-2xl font-bold tracking-tight">
-                  {carsSpainTopSalesRolling12m.length}
-                </p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-                <p className="text-xs text-slate-300">Datos actualizados</p>
-                <p className="font-semibold">{dataLastUpdated}</p>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        <section className="grid gap-6 lg:grid-cols-[320px_1fr]">
-          <aside className="rounded-2xl border bg-card/95 p-4 shadow-sm lg:sticky lg:top-6 lg:h-fit">
-            <div className="mb-4 flex items-center justify-between gap-2">
-              <h2 className="inline-flex items-center gap-2 text-sm font-semibold tracking-wide uppercase">
-                <Filter className="size-4" />
-                Filtros
-              </h2>
-              <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
-                {activeFiltersCount} activos
-              </span>
-            </div>
-
-            <Button
-              variant="outline"
-              onClick={resetFilters}
-              disabled={activeFiltersCount === 0}
-              className="mb-4 w-full"
-            >
-              <Trash2 className="size-4" />
-              Clear all filters
-            </Button>
-
-            <div className="space-y-5 text-sm">
-              <label className="space-y-2">
-                <span className="font-medium">Buscar modelo</span>
-                <span className="relative block">
-                  <Search className="absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
-                  <Input
-                    value={filters.query}
-                    onChange={(event) =>
-                      updateFilters((previous) => ({
-                        ...previous,
-                        query: event.target.value,
-                      }))
-                    }
-                    placeholder="Ej: Corolla, SUV, Peugeot"
-                    className="pr-3 pl-8"
-                  />
-                </span>
-              </label>
-
-              {!hasExtendedMetadata && (
-                <p className="rounded-md border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
-                  Dataset actual: solo ranking y matriculaciones por modelo.
-                </p>
-              )}
-
-              {availablePowertrainOptions.length > 0 && (
-                <div className="space-y-2">
-                  <p className="font-medium">Tipo de motor</p>
-                  <div className="grid gap-2">
-                    {availablePowertrainOptions.map(([value, label]) => (
-                      <label
-                        key={value}
-                        className="inline-flex items-center gap-2"
-                      >
-                        <Checkbox
-                          checked={filters.powertrains.includes(value)}
-                          onCheckedChange={(checked) =>
-                            updateFilters((previous) => ({
-                              ...previous,
-                              powertrains: toggleArrayValue(
-                                previous.powertrains,
-                                value,
-                                checked === true
-                              ),
-                            }))
-                          }
-                        />
-                        <span>{label}</span>
-                      </label>
-                    ))}
+            <div className="relative z-10 grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
+              <div className="space-y-4">
+                <div className="flex items-center gap-4">
+                  <AppLogo />
+                  <div>
+                    <h1 className="text-3xl leading-none font-black tracking-tight sm:text-4xl">
+                      {appName}
+                    </h1>
+                    <p className="mt-2 text-xs font-medium tracking-wide text-slate-400">
+                      Menos humo, más datos
+                    </p>
                   </div>
                 </div>
-              )}
 
-              {availableTransmissionOptions.length > 0 && (
-                <div className="space-y-2">
-                  <p className="font-medium">Cambio</p>
-                  <div className="grid gap-2">
-                    {availableTransmissionOptions.map(([value, label]) => (
-                      <label
-                        key={value}
-                        className="inline-flex items-center gap-2"
-                      >
-                        <Checkbox
-                          checked={filters.transmissions.includes(value)}
-                          onCheckedChange={(checked) =>
-                            updateFilters((previous) => ({
-                              ...previous,
-                              transmissions: toggleArrayValue(
-                                previous.transmissions,
-                                value,
-                                checked === true
-                              ),
-                            }))
-                          }
-                        />
-                        <span>{label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {availableDgtLabelOptions.length > 0 && (
-                <div className="space-y-2">
-                  <p className="font-medium">Etiqueta ambiental</p>
-                  <div className="grid gap-2">
-                    {availableDgtLabelOptions.map(([value, label]) => (
-                      <label
-                        key={value}
-                        className="inline-flex items-center gap-2"
-                      >
-                        <Checkbox
-                          checked={filters.dgtLabels.includes(value)}
-                          onCheckedChange={(checked) =>
-                            updateFilters((previous) => ({
-                              ...previous,
-                              dgtLabels: toggleArrayValue(
-                                previous.dgtLabels,
-                                value,
-                                checked === true
-                              ),
-                            }))
-                          }
-                        />
-                        <span>{label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {availableBodyTypeOptions.length > 0 && (
-                <div className="space-y-2">
-                  <p className="font-medium">Tipo de carroceria</p>
-                  <div className="grid gap-2">
-                    {availableBodyTypeOptions.map(([value, label]) => (
-                      <label
-                        key={value}
-                        className="inline-flex items-center gap-2"
-                      >
-                        <Checkbox
-                          checked={filters.bodyTypes.includes(value)}
-                          onCheckedChange={(checked) =>
-                            updateFilters((previous) => ({
-                              ...previous,
-                              bodyTypes: toggleArrayValue(
-                                previous.bodyTypes,
-                                value,
-                                checked === true
-                              ),
-                            }))
-                          }
-                        />
-                        <span>{label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {hasLengthData && (
-                <div className="space-y-2">
-                  <p className="inline-flex items-center gap-2 font-medium">
-                    <Ruler className="size-4" />
-                    Longitud (mm)
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      value={filters.minLength ?? ""}
-                      onChange={(event) =>
-                        updateNumericFilter("minLength", event.target.value)
-                      }
-                      placeholder="Min"
-                    />
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      value={filters.maxLength ?? ""}
-                      onChange={(event) =>
-                        updateNumericFilter("maxLength", event.target.value)
-                      }
-                      placeholder="Max"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {hasWidthData && (
-                <div className="space-y-2">
-                  <p className="inline-flex items-center gap-2 font-medium">
-                    <MoveHorizontal className="size-4" />
-                    Anchura (mm)
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      value={filters.minWidth ?? ""}
-                      onChange={(event) =>
-                        updateNumericFilter("minWidth", event.target.value)
-                      }
-                      placeholder="Min"
-                    />
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      value={filters.maxWidth ?? ""}
-                      onChange={(event) =>
-                        updateNumericFilter("maxWidth", event.target.value)
-                      }
-                      placeholder="Max"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {hasTrunkData && (
-                <div className="space-y-2">
-                  <p className="inline-flex items-center gap-2 font-medium">
-                    <Trees className="size-4" />
-                    Maletero (L)
-                  </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      value={filters.minTrunk ?? ""}
-                      onChange={(event) =>
-                        updateNumericFilter("minTrunk", event.target.value)
-                      }
-                      placeholder="Min"
-                    />
-                    <Input
-                      type="number"
-                      inputMode="numeric"
-                      value={filters.maxTrunk ?? ""}
-                      onChange={(event) =>
-                        updateNumericFilter("maxTrunk", event.target.value)
-                      }
-                      placeholder="Max"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          </aside>
-
-          <div className="space-y-4">
-            <div className="rounded-xl border bg-card px-4 py-3 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm text-muted-foreground">
-                  Mostrando <strong>{displayedCars.length}</strong> de{" "}
-                  {sortedCars.length} coches
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Datos actualizados: {dataLastUpdated}
+                <p className="max-w-2xl text-sm text-slate-400 sm:text-base">
+                  Comparador de coches en Espana con foco en matriculaciones
+                  reales. Filtra, ordena y comparte cada vista directamente con
+                  la URL.
                 </p>
               </div>
 
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">
-                    Orden actual:{" "}
-                    <strong>
-                      {sortFieldLabels[sortField]} (
-                      {sortDirection === "asc" ? "asc" : "desc"})
-                    </strong>
+              <div className="grid gap-2 text-right text-sm sm:min-w-52">
+                <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                  <p className="text-xs text-slate-300">
+                    Modelos monitorizados
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    En tabla: haz click en la cabecera de la columna para
-                    ordenar.
+                  <p className="text-2xl font-bold tracking-tight">
+                    {carsSpainTopSalesRolling12m.length}
                   </p>
                 </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3">
+                  <p className="text-xs text-slate-300">Datos actualizados</p>
+                  <p className="font-semibold">{dataLastUpdated}</p>
+                </div>
+              </div>
+            </div>
+          </header>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Mostrar</span>
-                  <Select
-                    value={resultsLimit}
-                    onValueChange={(value) =>
-                      setState((previous) => ({
-                        ...previous,
-                        resultsLimit: parseResultsLimit(value),
-                      }))
-                    }
+          <section className="grid gap-6 lg:grid-cols-[320px_1fr]">
+            <aside className="rounded-2xl border bg-card/95 p-4 shadow-sm lg:sticky lg:top-6 lg:h-fit">
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <h2 className="inline-flex items-center gap-2 text-sm font-semibold tracking-wide uppercase">
+                  <Filter className="size-4" />
+                  Filtros
+                </h2>
+                {activeFiltersCount > 0 && (
+                  <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                    {activeFiltersCount} activos
+                  </span>
+                )}
+              </div>
+
+              <Button
+                variant="outline"
+                onClick={resetFilters}
+                disabled={activeFiltersCount === 0}
+                className="mb-4 w-full"
+              >
+                <Trash2 className="size-4" />
+                Borrar filtros
+              </Button>
+
+              <div className="space-y-5 text-sm">
+                <label className="space-y-2">
+                  <span className="font-medium">Buscar modelo</span>
+                  <span className="relative block">
+                    <Search className="absolute top-2.5 left-2.5 size-4 text-muted-foreground" />
+                    <Input
+                      value={filters.query}
+                      onChange={(event) =>
+                        updateFilters((previous) => ({
+                          ...previous,
+                          query: event.target.value,
+                        }))
+                      }
+                      placeholder="Ej: Corolla, SUV, Peugeot"
+                      className="pr-3 pl-8"
+                      aria-describedby="search-hint"
+                    />
+                  </span>
+                  <p id="search-hint" className="text-xs text-muted-foreground">
+                    Marca o modelo
+                  </p>
+                </label>
+
+                {!hasExtendedMetadata && (
+                  <p className="rounded-md border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
+                    Dataset actual: solo ranking y matriculaciones por modelo.
+                  </p>
+                )}
+
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setExpandedSections(toggleSection(expandedSections, "marca"))}
+                    className="flex w-full items-center justify-between rounded-lg hover:bg-accent/50 px-1 py-1 transition-colors"
                   >
-                    <SelectTrigger size="sm" className="w-[120px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent align="end">
-                      {resultsLimitOptions.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Tabs
-                    value={viewMode}
-                    onValueChange={(value) =>
-                      setState((previous) => ({
-                        ...previous,
-                        viewMode: value as ViewMode,
-                      }))
-                    }
-                  >
-                    <TabsList>
-                      <TabsTrigger value="cards">
-                        <List className="size-4" />
-                        Tarjetas
-                      </TabsTrigger>
-                      <TabsTrigger value="table">
-                        <TableIcon className="size-4" />
-                        Tabla
-                      </TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-
-                  {viewMode === "table" && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        setIsColumnPanelOpen((previous) => !previous)
-                      }
-                    >
-                      Columnas ({visibleColumns.length})
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {viewMode === "table" && isColumnPanelOpen && (
-                <div className="mt-3 rounded-lg border bg-card p-3 shadow-sm">
-                  <p className="text-xs font-medium text-muted-foreground">
-                    Columnas visibles
-                  </p>
-                  <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {tableColumnDefinitions.map((column) => {
-                      const isVisible = visibleColumnSet.has(column.key)
-                      const isLastVisible =
-                        visibleColumns.length === 1 && isVisible
-
-                      return (
+                    <p className="font-medium">Marca</p>
+                    <ChevronDown
+                      className={`size-4 transition-transform ${
+                        expandedSections.has("marca") ? "" : "-rotate-90"
+                      }`}
+                    />
+                  </button>
+                  {expandedSections.has("marca") && (
+                    <div className="grid gap-2">
+                      {uniqueBrands.map((brand) => (
                         <label
-                          key={column.key}
-                          className="inline-flex items-center gap-2 text-xs"
+                          key={brand}
+                          className="inline-flex items-center gap-2"
                         >
                           <Checkbox
-                            checked={isVisible}
-                            disabled={isLastVisible}
+                            checked={filters.brands.includes(brand)}
                             onCheckedChange={(checked) =>
-                              toggleVisibleColumn(column.key, checked === true)
+                              updateFilters((previous) => ({
+                                ...previous,
+                                brands: toggleArrayValue(
+                                  previous.brands,
+                                  brand,
+                                  checked === true
+                                ),
+                                // Reset models if unchecking a brand
+                                models: checked === false
+                                  ? previous.models.filter(
+                                      (m) => !modelsByBrand[brand]?.includes(m)
+                                    )
+                                  : previous.models,
+                              }))
                             }
                           />
-                          <span>{column.label}</span>
+                          <span>{brand}</span>
                         </label>
-                      )
-                    })}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
 
-            {displayedCars.length === 0 ? (
-              <div className="rounded-xl border bg-card p-10 text-center shadow-sm">
-                <p className="text-base font-medium">
-                  No hay resultados para esos filtros.
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Prueba a ampliar rangos o quitar etiquetas, cambios y motores.
-                </p>
-              </div>
-            ) : viewMode === "cards" ? (
-              <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 items-stretch">
-                {displayedCars.map((car) => (
-                  <li key={car.id} className="flex min-h-0">
-                    <Card className="grid h-full min-h-0 w-full grid-rows-[auto_1fr] gap-0 overflow-hidden py-0 transition hover:-translate-y-0.5 hover:shadow-md">
-                      <div className="aspect-16/9 shrink-0 bg-muted">
-                        {!car.imageUrl || brokenImageIds.has(car.id) ? (
-                          <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-                            <ImageOff className="size-4" />
-                            Imagen no disponible
-                          </div>
-                        ) : (
-                          <img
-                            src={car.imageUrl}
-                            alt={`${car.brand} ${car.model}`}
-                            loading="lazy"
-                            className="h-full w-full object-cover"
-                            onError={() => markImageAsBroken(car.id)}
-                          />
+                {filters.brands.length > 0 && (
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => setExpandedSections(toggleSection(expandedSections, "modelo"))}
+                      className="flex w-full items-center justify-between rounded-lg hover:bg-accent/50 px-1 py-1 transition-colors"
+                    >
+                      <p className="font-medium">Modelo</p>
+                      <ChevronDown
+                        className={`size-4 transition-transform ${
+                          expandedSections.has("modelo") ? "" : "-rotate-90"
+                        }`}
+                      />
+                    </button>
+                    {expandedSections.has("modelo") && (
+                      <div className="grid gap-2">
+                        {filters.brands.flatMap((brand) =>
+                          modelsByBrand[brand]?.map((model) => (
+                            <label
+                              key={model}
+                              className="inline-flex items-center gap-2"
+                            >
+                              <Checkbox
+                                checked={filters.models.includes(model)}
+                                onCheckedChange={(checked) =>
+                                  updateFilters((previous) => ({
+                                    ...previous,
+                                    models: toggleArrayValue(
+                                      previous.models,
+                                      model,
+                                      checked === true
+                                    ),
+                                  }))
+                                }
+                              />
+                              <span>{model}</span>
+                            </label>
+                          )) ?? []
                         )}
                       </div>
+                    )}
+                  </div>
+                )}
 
-                      <CardContent className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden p-4">
-                        <p className="text-xs font-medium text-muted-foreground">
-                          {integerFormatter.format(car.salesUnits12m)}{" "}
-                          matriculaciones ({salesWindowMonths}m)
-                        </p>
-                        <h3 className="mt-1 text-lg font-semibold">
-                          {car.brand} {car.model}
-                        </h3>
+                {availablePowertrainOptions.length > 0 && (
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => setExpandedSections(toggleSection(expandedSections, "motor"))}
+                      className="flex w-full items-center justify-between rounded-lg hover:bg-accent/50 px-1 py-1 transition-colors"
+                    >
+                      <p className="font-medium">Tipo de motor</p>
+                      <ChevronDown
+                        className={`size-4 transition-transform ${
+                          expandedSections.has("motor") ? "" : "-rotate-90"
+                        }`}
+                      />
+                    </button>
+                    {expandedSections.has("motor") && (
+                      <div className="grid gap-2">
+                        {availablePowertrainOptions.map(([value, label]) => (
+                          <label
+                            key={value}
+                            className="inline-flex items-center gap-2"
+                          >
+                            <Checkbox
+                              checked={filters.powertrains.includes(value)}
+                              onCheckedChange={(checked) =>
+                                updateFilters((previous) => ({
+                                  ...previous,
+                                  powertrains: toggleArrayValue(
+                                    previous.powertrains,
+                                    value,
+                                    checked === true
+                                  ),
+                                }))
+                              }
+                            />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
-                        <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
-                          <Badge variant="secondary">
-                            {car.bodyType
-                              ? bodyTypeLabels[car.bodyType]
-                              : "Tipo N/D"}
-                          </Badge>
-                          {car.visibleDgtLabels.map((label) => (
-                            <Badge
-                              key={label}
-                              className="bg-emerald-100 font-medium text-emerald-900"
-                            >
-                              {label}
+                {availableTransmissionOptions.length > 0 && (
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => setExpandedSections(toggleSection(expandedSections, "cambio"))}
+                      className="flex w-full items-center justify-between rounded-lg hover:bg-accent/50 px-1 py-1 transition-colors"
+                    >
+                      <p className="font-medium">Cambio</p>
+                      <ChevronDown
+                        className={`size-4 transition-transform ${
+                          expandedSections.has("cambio") ? "" : "-rotate-90"
+                        }`}
+                      />
+                    </button>
+                    {expandedSections.has("cambio") && (
+                      <div className="grid gap-2">
+                        {availableTransmissionOptions.map(([value, label]) => (
+                          <label
+                            key={value}
+                            className="inline-flex items-center gap-2"
+                          >
+                            <Checkbox
+                              checked={filters.transmissions.includes(value)}
+                              onCheckedChange={(checked) =>
+                                updateFilters((previous) => ({
+                                  ...previous,
+                                  transmissions: toggleArrayValue(
+                                    previous.transmissions,
+                                    value,
+                                    checked === true
+                                  ),
+                                }))
+                              }
+                            />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {availableDgtLabelOptions.length > 0 && (
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => setExpandedSections(toggleSection(expandedSections, "etiqueta"))}
+                      className="flex w-full items-center justify-between rounded-lg hover:bg-accent/50 px-1 py-1 transition-colors"
+                    >
+                      <p className="font-medium">Etiqueta ambiental</p>
+                      <ChevronDown
+                        className={`size-4 transition-transform ${
+                          expandedSections.has("etiqueta") ? "" : "-rotate-90"
+                        }`}
+                      />
+                    </button>
+                    {expandedSections.has("etiqueta") && (
+                      <div className="grid gap-2">
+                        {availableDgtLabelOptions.map(([value, label]) => (
+                          <label
+                            key={value}
+                            className="inline-flex items-center gap-2"
+                          >
+                            <Checkbox
+                              checked={filters.dgtLabels.includes(value)}
+                              onCheckedChange={(checked) =>
+                                updateFilters((previous) => ({
+                                  ...previous,
+                                  dgtLabels: toggleArrayValue(
+                                    previous.dgtLabels,
+                                    value,
+                                    checked === true
+                                  ),
+                                }))
+                              }
+                            />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {availableBodyTypeOptions.length > 0 && (
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => setExpandedSections(toggleSection(expandedSections, "carroceria"))}
+                      className="flex w-full items-center justify-between rounded-lg hover:bg-accent/50 px-1 py-1 transition-colors"
+                    >
+                      <p className="font-medium">Tipo de carroceria</p>
+                      <ChevronDown
+                        className={`size-4 transition-transform ${
+                          expandedSections.has("carroceria") ? "" : "-rotate-90"
+                        }`}
+                      />
+                    </button>
+                    {expandedSections.has("carroceria") && (
+                      <div className="grid gap-2">
+                        {availableBodyTypeOptions.map(([value, label]) => (
+                          <label
+                            key={value}
+                            className="inline-flex items-center gap-2"
+                          >
+                            <Checkbox
+                              checked={filters.bodyTypes.includes(value)}
+                              onCheckedChange={(checked) =>
+                                updateFilters((previous) => ({
+                                  ...previous,
+                                  bodyTypes: toggleArrayValue(
+                                    previous.bodyTypes,
+                                    value,
+                                    checked === true
+                                  ),
+                                }))
+                              }
+                            />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {hasLengthData && (
+                  <div className="space-y-2">
+                    <p className="inline-flex items-center gap-2 font-medium">
+                      <Ruler className="size-4" />
+                      Longitud (mm)
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        value={filters.minLength ?? ""}
+                        onChange={(event) =>
+                          updateNumericFilter("minLength", event.target.value)
+                        }
+                        placeholder="Min"
+                      />
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        value={filters.maxLength ?? ""}
+                        onChange={(event) =>
+                          updateNumericFilter("maxLength", event.target.value)
+                        }
+                        placeholder="Max"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {hasWidthData && (
+                  <div className="space-y-2">
+                    <p className="inline-flex items-center gap-2 font-medium">
+                      <MoveHorizontal className="size-4" />
+                      Anchura (mm)
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        value={filters.minWidth ?? ""}
+                        onChange={(event) =>
+                          updateNumericFilter("minWidth", event.target.value)
+                        }
+                        placeholder="Min"
+                      />
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        value={filters.maxWidth ?? ""}
+                        onChange={(event) =>
+                          updateNumericFilter("maxWidth", event.target.value)
+                        }
+                        placeholder="Max"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {hasTrunkData && (
+                  <div className="space-y-2">
+                    <p className="inline-flex items-center gap-2 font-medium">
+                      <Trees className="size-4" />
+                      Maletero (L)
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        value={filters.minTrunk ?? ""}
+                        onChange={(event) =>
+                          updateNumericFilter("minTrunk", event.target.value)
+                        }
+                        placeholder="Min"
+                      />
+                      <Input
+                        type="number"
+                        inputMode="numeric"
+                        value={filters.maxTrunk ?? ""}
+                        onChange={(event) =>
+                          updateNumericFilter("maxTrunk", event.target.value)
+                        }
+                        placeholder="Max"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </aside>
+
+            <div className="space-y-4">
+              <div className="rounded-xl border bg-card px-4 py-3 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm text-muted-foreground">
+                    Mostrando <strong>{displayedCars.length}</strong> de{" "}
+                    {sortedCars.length} coches
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Datos actualizados: {dataLastUpdated}
+                  </p>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      Orden actual:{" "}
+                      <strong>
+                        {sortFieldLabels[sortField]} (
+                        {sortDirection === "asc" ? "asc" : "desc"})
+                      </strong>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      En tabla: haz click en la cabecera de la columna para
+                      ordenar.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      Mostrar
+                    </span>
+                    <Select
+                      value={resultsLimit}
+                      onValueChange={(value) =>
+                        setState((previous) => ({
+                          ...previous,
+                          resultsLimit: parseResultsLimit(value),
+                        }))
+                      }
+                    >
+                      <SelectTrigger size="sm" className="w-[120px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent align="end">
+                        {resultsLimitOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <Tabs
+                      value={viewMode}
+                      onValueChange={(value) =>
+                        setState((previous) => ({
+                          ...previous,
+                          viewMode: value as ViewMode,
+                        }))
+                      }
+                    >
+                      <TabsList>
+                        <TabsTrigger value="cards">
+                          <List className="size-4" />
+                          Tarjetas
+                        </TabsTrigger>
+                        <TabsTrigger value="table">
+                          <TableIcon className="size-4" />
+                          Tabla
+                        </TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+
+                    {viewMode === "table" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setIsColumnPanelOpen((previous) => !previous)
+                        }
+                      >
+                        Columnas ({visibleColumns.length})
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {viewMode === "table" && isColumnPanelOpen && (
+                  <div className="mt-3 rounded-lg border bg-card p-3 shadow-sm">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Columnas visibles
+                    </p>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {tableColumnDefinitions.map((column) => {
+                        const isVisible = visibleColumnSet.has(column.key)
+                        const isLastVisible =
+                          visibleColumns.length === 1 && isVisible
+
+                        return (
+                          <label
+                            key={column.key}
+                            className="inline-flex items-center gap-2 text-xs"
+                          >
+                            <Checkbox
+                              checked={isVisible}
+                              disabled={isLastVisible}
+                              onCheckedChange={(checked) =>
+                                toggleVisibleColumn(
+                                  column.key,
+                                  checked === true
+                                )
+                              }
+                            />
+                            <span>{column.label}</span>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {displayedCars.length === 0 ? (
+                <div className="rounded-xl border bg-card p-10 text-center shadow-sm">
+                  <p className="text-base font-medium">
+                    No hay resultados para esos filtros.
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Prueba a ampliar rangos o quitar etiquetas, cambios y
+                    motores.
+                  </p>
+                </div>
+              ) : viewMode === "cards" ? (
+                <ul className="grid items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {displayedCars.map((car) => (
+                    <li key={car.id} className="flex min-h-0">
+                      <Card className="grid h-full min-h-0 w-full grid-rows-[auto_1fr] gap-0 overflow-hidden py-0 transition hover:-translate-y-0.5 hover:shadow-md">
+                        <div className="aspect-16/9 shrink-0 bg-muted">
+                          {!car.imageUrl || brokenImageIds.has(car.id) ? (
+                            <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                              <ImageOff className="size-4" />
+                              Imagen no disponible
+                            </div>
+                          ) : (
+                            <img
+                              src={car.imageUrl}
+                              alt={`${car.brand} ${car.model}`}
+                              loading="lazy"
+                              className="h-full w-full object-cover"
+                              onError={() => markImageAsBroken(car.id)}
+                            />
+                          )}
+                        </div>
+
+                        <CardContent className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden p-4">
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {integerFormatter.format(car.salesUnits12m)}{" "}
+                            matriculaciones ({salesWindowMonths}m)
+                          </p>
+                          <h3 className="mt-1 text-lg font-semibold">
+                            {car.brand} {car.model}
+                          </h3>
+
+                          <div className="mt-3 flex flex-wrap gap-1.5 text-xs">
+                            <Badge variant="secondary">
+                              {car.bodyType
+                                ? bodyTypeLabels[car.bodyType]
+                                : "Tipo N/D"}
                             </Badge>
-                          ))}
-                        </div>
+                            {car.visibleDgtLabels.map((label) => (
+                              <Badge
+                                key={label}
+                                className="bg-emerald-100 font-medium text-emerald-900"
+                              >
+                                {label}
+                              </Badge>
+                            ))}
+                          </div>
 
-                        <dl className="mt-4 grid grid-cols-3 gap-3 text-sm">
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Longitud
-                            </dt>
-                            <dd className="font-medium">
-                              {formatOptionalNumber(car.lengthMm, "mm")}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Anchura
-                            </dt>
-                            <dd className="font-medium">
-                              {formatOptionalNumber(car.widthMm, "mm")}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-muted-foreground">
-                              Maletero
-                            </dt>
-                            <dd className="font-medium">
-                              {formatOptionalNumber(car.trunkLiters, "L")}
-                            </dd>
-                          </div>
-                        </dl>
+                          <dl className="mt-4 grid grid-cols-3 gap-3 text-sm">
+                            <div>
+                              <dt className="text-xs text-muted-foreground">
+                                Longitud
+                              </dt>
+                              <dd className="font-medium">
+                                {formatOptionalNumber(car.lengthMm, "mm")}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs text-muted-foreground">
+                                Anchura
+                              </dt>
+                              <dd className="font-medium">
+                                {formatOptionalNumber(car.widthMm, "mm")}
+                              </dd>
+                            </div>
+                            <div>
+                              <dt className="text-xs text-muted-foreground">
+                                Maletero
+                              </dt>
+                              <dd className="font-medium">
+                                {formatOptionalNumber(car.trunkLiters, "L")}
+                              </dd>
+                            </div>
+                          </dl>
 
-                        <div className="mt-auto pt-4 space-y-2">
-                          <div>
-                            <p className="text-xs text-muted-foreground">
-                              Motores disponibles
-                            </p>
-                            <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
-                              {car.visiblePowertrains.length > 0 ? (
-                                car.visiblePowertrains.map((powertrain) => (
-                                  <Badge key={powertrain} variant="outline">
-                                    {powertrainLabels[powertrain]}
-                                  </Badge>
-                                ))
-                              ) : (
-                                <span className="text-muted-foreground">
-                                  {naText}
-                                </span>
-                              )}
+                          <div className="mt-auto space-y-2 pt-4">
+                            <div>
+                              <p className="text-xs text-muted-foreground">
+                                Motores disponibles
+                              </p>
+                              <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
+                                {car.visiblePowertrains.length > 0 ? (
+                                  car.visiblePowertrains.map((powertrain) => (
+                                    <Badge key={powertrain} variant="outline">
+                                      {powertrainLabels[powertrain]}
+                                    </Badge>
+                                  ))
+                                ) : (
+                                  <span className="text-muted-foreground">
+                                    {naText}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div>
+                              <p className="text-xs text-muted-foreground">
+                                Cambios disponibles
+                              </p>
+                              <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
+                                {car.visibleTransmissions.length > 0 ? (
+                                  car.visibleTransmissions.map(
+                                    (transmission) => (
+                                      <Badge
+                                        key={transmission}
+                                        variant="outline"
+                                      >
+                                        {transmissionLabels[transmission]}
+                                      </Badge>
+                                    )
+                                  )
+                                ) : (
+                                  <span className="text-muted-foreground">
+                                    {naText}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           </div>
-
-                          <div>
-                            <p className="text-xs text-muted-foreground">
-                              Cambios disponibles
-                            </p>
-                            <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
-                              {car.visibleTransmissions.length > 0 ? (
-                                car.visibleTransmissions.map((transmission) => (
-                                  <Badge key={transmission} variant="outline">
-                                    {transmissionLabels[transmission]}
-                                  </Badge>
-                                ))
-                              ) : (
-                                <span className="text-muted-foreground">
-                                  {naText}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="rounded-xl border bg-card shadow-sm">
-                <Table className="min-w-[900px]">
-                  <TableHeader className="bg-muted/60">
-                    <TableRow>
-                      {visibleColumnDefinitions.map((column) => (
-                        <TableHead
-                          key={column.key}
-                          className="h-11 bg-muted/60"
-                        >
-                          {column.sortField ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="-ml-2 h-8 px-2 text-xs font-semibold"
-                              onClick={() => sortByColumn(column.sortField!)}
-                            >
-                              <span className="inline-flex items-center gap-1.5">
-                                {column.label}
-                                {column.key === "salesUnits12m" ? (
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span
-                                        className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground/80 hover:text-foreground"
-                                        role="button"
-                                        tabIndex={0}
-                                        aria-label="Info sobre Ranking 12m"
-                                        onClick={(event) => {
-                                          event.preventDefault()
-                                          event.stopPropagation()
-                                        }}
-                                        onKeyDown={(event) => {
-                                          if (
-                                            event.key === "Enter" ||
-                                            event.key === " "
-                                          ) {
+                        </CardContent>
+                      </Card>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="rounded-xl border bg-card shadow-sm">
+                  <Table className="min-w-[900px]">
+                    <TableHeader className="bg-muted/60">
+                      <TableRow>
+                        {visibleColumnDefinitions.map((column) => (
+                          <TableHead
+                            key={column.key}
+                            className="h-11 bg-muted/60"
+                          >
+                            {column.sortField ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="-ml-2 h-8 px-2 text-xs font-semibold"
+                                onClick={() => sortByColumn(column.sortField!)}
+                              >
+                                <span className="inline-flex items-center gap-1.5">
+                                  {column.label}
+                                  {column.key === "salesUnits12m" ? (
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <span
+                                          className="inline-flex size-4 items-center justify-center rounded-full text-muted-foreground/80 hover:text-foreground"
+                                          role="button"
+                                          tabIndex={0}
+                                          aria-label="Info sobre Ranking 12m"
+                                          onClick={(event) => {
                                             event.preventDefault()
                                             event.stopPropagation()
-                                          }
-                                        }}
-                                      >
-                                        <Info className="size-3.5" />
-                                      </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="max-w-64 text-xs leading-relaxed">
-                                      Total de matriculaciones acumuladas por modelo en los
-                                      ultimos {salesWindowMonths} meses completos
-                                      ({salesWindowLabel}).
-                                    </TooltipContent>
-                                  </Tooltip>
-                                ) : null}
-                              </span>
-                              {sortField === column.sortField ? (
-                                sortDirection === "asc" ? (
-                                  <ArrowUp className="size-3.5" />
-                                ) : (
-                                  <ArrowDown className="size-3.5" />
-                                )
-                              ) : (
-                                <ArrowUpDown className="size-3.5 opacity-60" />
-                              )}
-                            </Button>
-                          ) : (
-                            column.label
-                          )}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody className="[&_tr:nth-child(even)]:bg-muted/15">
-                    {displayedCars.map((car) => (
-                      <TableRow key={car.id}>
-                        {visibleColumnDefinitions.map((column) => {
-                          if (column.key === "photo") {
-                            return (
-                              <TableCell key={column.key}>
-                                <div className="h-16 w-28 overflow-hidden rounded-md border bg-muted">
-                                  {!car.imageUrl ||
-                                  brokenImageIds.has(car.id) ? (
-                                    <div className="flex h-full items-center justify-center text-muted-foreground">
-                                      <ImageOff className="size-4" />
-                                    </div>
+                                          }}
+                                          onKeyDown={(event) => {
+                                            if (
+                                              event.key === "Enter" ||
+                                              event.key === " "
+                                            ) {
+                                              event.preventDefault()
+                                              event.stopPropagation()
+                                            }
+                                          }}
+                                        >
+                                          <Info className="size-3.5" />
+                                        </span>
+                                      </TooltipTrigger>
+                                      <TooltipContent className="max-w-64 text-xs leading-relaxed">
+                                        Total de matriculaciones acumuladas por
+                                        modelo en los ultimos{" "}
+                                        {salesWindowMonths} meses completos (
+                                        {salesWindowLabel}).
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  ) : null}
+                                </span>
+                                {sortField === column.sortField ? (
+                                  sortDirection === "asc" ? (
+                                    <ArrowUp className="size-3.5" />
                                   ) : (
-                                    <img
-                                      src={car.imageUrl}
-                                      alt={`${car.brand} ${car.model}`}
-                                      loading="lazy"
-                                      className="h-full w-full object-cover"
-                                      onError={() => markImageAsBroken(car.id)}
-                                    />
-                                  )}
-                                </div>
-                              </TableCell>
-                            )
-                          }
+                                    <ArrowDown className="size-3.5" />
+                                  )
+                                ) : (
+                                  <ArrowUpDown className="size-3.5 opacity-60" />
+                                )}
+                              </Button>
+                            ) : (
+                              column.label
+                            )}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody className="[&_tr:nth-child(even)]:bg-muted/15">
+                      {displayedCars.map((car) => (
+                        <TableRow key={car.id}>
+                          {visibleColumnDefinitions.map((column) => {
+                            if (column.key === "photo") {
+                              return (
+                                <TableCell key={column.key}>
+                                  <div className="h-16 w-28 overflow-hidden rounded-md border bg-muted">
+                                    {!car.imageUrl ||
+                                    brokenImageIds.has(car.id) ? (
+                                      <div className="flex h-full items-center justify-center text-muted-foreground">
+                                        <ImageOff className="size-4" />
+                                      </div>
+                                    ) : (
+                                      <img
+                                        src={car.imageUrl}
+                                        alt={`${car.brand} ${car.model}`}
+                                        loading="lazy"
+                                        className="h-full w-full object-cover"
+                                        onError={() =>
+                                          markImageAsBroken(car.id)
+                                        }
+                                      />
+                                    )}
+                                  </div>
+                                </TableCell>
+                              )
+                            }
 
-                          if (column.key === "model") {
-                            return (
-                              <TableCell
-                                key={column.key}
-                                className="max-w-56 font-medium"
-                              >
-                                {car.brand} {car.model}
-                                <p className="text-xs text-muted-foreground">
+                            if (column.key === "model") {
+                              return (
+                                <TableCell
+                                  key={column.key}
+                                  className="max-w-56 font-medium"
+                                >
+                                  {car.brand} {car.model}
+                                  <p className="text-xs text-muted-foreground">
+                                    {car.bodyType
+                                      ? bodyTypeLabels[car.bodyType]
+                                      : "Tipo N/D"}
+                                  </p>
+                                </TableCell>
+                              )
+                            }
+
+                            if (column.key === "salesUnits12m") {
+                              return (
+                                <TableCell key={column.key}>
+                                  {integerFormatter.format(car.salesUnits12m)}
+                                </TableCell>
+                              )
+                            }
+
+                            if (column.key === "bodyType") {
+                              return (
+                                <TableCell key={column.key}>
                                   {car.bodyType
                                     ? bodyTypeLabels[car.bodyType]
-                                    : "Tipo N/D"}
-                                </p>
-                              </TableCell>
-                            )
-                          }
+                                    : naText}
+                                </TableCell>
+                              )
+                            }
 
-                          if (column.key === "salesUnits12m") {
+                            if (column.key === "dgtLabels") {
+                              return (
+                                <TableCell
+                                  key={column.key}
+                                  className="max-w-36 overflow-hidden text-ellipsis whitespace-nowrap"
+                                  title={car.visibleDgtLabels.join(", ")}
+                                >
+                                  {car.visibleDgtLabels.join(", ") || naText}
+                                </TableCell>
+                              )
+                            }
+
+                            if (column.key === "transmissions") {
+                              return (
+                                <TableCell
+                                  key={column.key}
+                                  className="max-w-44 overflow-hidden text-ellipsis whitespace-nowrap"
+                                  title={car.visibleTransmissions
+                                    .map((item) => transmissionLabels[item])
+                                    .join(", ")}
+                                >
+                                  {car.visibleTransmissions
+                                    .map((item) => transmissionLabels[item])
+                                    .join(", ") || naText}
+                                </TableCell>
+                              )
+                            }
+
+                            if (column.key === "powertrains") {
+                              return (
+                                <TableCell
+                                  key={column.key}
+                                  className="max-w-64 overflow-hidden text-ellipsis whitespace-nowrap"
+                                  title={car.visiblePowertrains
+                                    .map((item) => powertrainLabels[item])
+                                    .join(", ")}
+                                >
+                                  {car.visiblePowertrains
+                                    .map((item) => powertrainLabels[item])
+                                    .join(", ") || naText}
+                                </TableCell>
+                              )
+                            }
+
+                            if (column.key === "lengthMm") {
+                              return (
+                                <TableCell key={column.key}>
+                                  {formatOptionalNumber(car.lengthMm, "mm")}
+                                </TableCell>
+                              )
+                            }
+
+                            if (column.key === "widthMm") {
+                              return (
+                                <TableCell key={column.key}>
+                                  {formatOptionalNumber(car.widthMm, "mm")}
+                                </TableCell>
+                              )
+                            }
+
                             return (
                               <TableCell key={column.key}>
-                                {integerFormatter.format(car.salesUnits12m)}
+                                {formatOptionalNumber(car.trunkLiters, "L")}
                               </TableCell>
                             )
-                          }
+                          })}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
 
-                          if (column.key === "bodyType") {
-                            return (
-                              <TableCell key={column.key}>
-                                {car.bodyType
-                                  ? bodyTypeLabels[car.bodyType]
-                                  : naText}
-                              </TableCell>
-                            )
-                          }
-
-                          if (column.key === "dgtLabels") {
-                            return (
-                              <TableCell
-                                key={column.key}
-                                className="max-w-36 overflow-hidden text-ellipsis whitespace-nowrap"
-                                title={car.visibleDgtLabels.join(", ")}
-                              >
-                                {car.visibleDgtLabels.join(", ") || naText}
-                              </TableCell>
-                            )
-                          }
-
-                          if (column.key === "transmissions") {
-                            return (
-                              <TableCell
-                                key={column.key}
-                                className="max-w-44 overflow-hidden text-ellipsis whitespace-nowrap"
-                                title={car.visibleTransmissions
-                                  .map((item) => transmissionLabels[item])
-                                  .join(", ")}
-                              >
-                                {car.visibleTransmissions
-                                  .map((item) => transmissionLabels[item])
-                                  .join(", ") || naText}
-                              </TableCell>
-                            )
-                          }
-
-                          if (column.key === "powertrains") {
-                            return (
-                              <TableCell
-                                key={column.key}
-                                className="max-w-64 overflow-hidden text-ellipsis whitespace-nowrap"
-                                title={car.visiblePowertrains
-                                  .map((item) => powertrainLabels[item])
-                                  .join(", ")}
-                              >
-                                {car.visiblePowertrains
-                                  .map((item) => powertrainLabels[item])
-                                  .join(", ") || naText}
-                              </TableCell>
-                            )
-                          }
-
-                          if (column.key === "lengthMm") {
-                            return (
-                              <TableCell key={column.key}>
-                                {formatOptionalNumber(car.lengthMm, "mm")}
-                              </TableCell>
-                            )
-                          }
-
-                          if (column.key === "widthMm") {
-                            return (
-                              <TableCell key={column.key}>
-                                {formatOptionalNumber(car.widthMm, "mm")}
-                              </TableCell>
-                            )
-                          }
-
-                          return (
-                            <TableCell key={column.key}>
-                              {formatOptionalNumber(car.trunkLiters, "L")}
-                            </TableCell>
-                          )
-                        })}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-
-            <footer className="rounded-xl border bg-card px-4 py-3 text-xs text-muted-foreground shadow-sm">
-              <p>
-                Fuentes:
-                <a
-                  className="ml-1 underline"
-                  href={dataSources.salesRanking.url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {dataSources.salesRanking.title}
-                </a>
-                ,
-                <a
-                  className="ml-1 underline"
-                  href={dataSources.modelMetadata.url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {dataSources.modelMetadata.title}
-                </a>
-                .
-              </p>
-              <p className="mt-1">
-                Nota: las matriculaciones se agregan sobre los ultimos{" "}
-                {salesWindowMonths} meses disponibles ({salesWindowLabel}) para
-                categoria M1. Los metadatos tecnicos se completan desde un cache
-                local (actualmente para los 20 modelos mas vendidos); el resto
-                se muestra como {naText}.
-              </p>
-            </footer>
-          </div>
-        </section>
-      </div>
+              <footer className="rounded-xl border bg-card px-4 py-3 text-xs text-muted-foreground shadow-sm">
+                <p>
+                  Fuentes:
+                  <a
+                    className="ml-1 underline"
+                    href={dataSources.salesRanking.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {dataSources.salesRanking.title}
+                  </a>
+                  ,
+                  <a
+                    className="ml-1 underline"
+                    href={dataSources.modelMetadata.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {dataSources.modelMetadata.title}
+                  </a>
+                  .
+                </p>
+                <p className="mt-1">
+                  Nota: las matriculaciones se agregan sobre los ultimos{" "}
+                  {salesWindowMonths} meses disponibles ({salesWindowLabel})
+                  para categoria M1. Los metadatos tecnicos se completan desde
+                  un cache local (actualmente para los 20 modelos mas vendidos);
+                  el resto se muestra como {naText}.
+                </p>
+              </footer>
+            </div>
+          </section>
+        </div>
       </main>
     </TooltipProvider>
   )
