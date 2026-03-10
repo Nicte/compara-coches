@@ -13,6 +13,59 @@ const USER_AGENT =
 
 const SOURCE_PRIORITY = ["coches", "km77", "qcm"]
 
+// Keep explicit seeds for known hard-to-discover KM77 routes.
+const KM77_SEED_URLS_BY_ID = {
+  "byd-byd-dolphin-surf": [
+    "https://www.km77.com/coches/byd/dolphin-surf/2025/estandar/estandar/dolphin-surf-comfort/datos",
+  ],
+  "byd-byd-seal-u-dm-i": [
+    "https://www.km77.com/coches/byd/seal-u/2024/estandar/phev/seal-u-dm-i-comfort/datos",
+  ],
+  "mercedes-benz-gla-250-e": [
+    "https://www.km77.com/coches/mercedes/gla/2020/estandar/e/gla-250-e/datos",
+  ],
+  "mercedes-benz-glc-220-d-4matic": [
+    "https://www.km77.com/coches/mercedes/clase-glc/2023/estandar/estandar/glc-220-d-4matic/datos",
+  ],
+  "mercedes-benz-glc-300-de-4matic": [
+    "https://www.km77.com/coches/mercedes/clase-glc/2023/estandar/e/glc-300-de-4matic2/datos",
+  ],
+  "tesla-model-y": [
+    "https://www.km77.com/coches/tesla/model-y/2025/estandar/estandar/model-y-standard/datos",
+  ],
+  "toyota-toyota-aygo-x": [
+    "https://www.km77.com/coches/toyota/aygo-x/2026/5-puertas/estandar/aygo-x/datos",
+  ],
+}
+
+function parseCliForcedIds(argv) {
+  const forced = []
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]
+    if (arg === "--ids") {
+      const next = argv[i + 1] ?? ""
+      forced.push(
+        ...next
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean)
+      )
+      i += 1
+      continue
+    }
+    if (arg.startsWith("--ids=")) {
+      forced.push(
+        ...arg
+          .slice("--ids=".length)
+          .split(",")
+          .map((v) => v.trim())
+          .filter(Boolean)
+      )
+    }
+  }
+  return [...new Set(forced)]
+}
+
 function slugify(value) {
   return value
     .toLowerCase()
@@ -79,30 +132,71 @@ function buildCandidateSlugs(modelId, mapping) {
   // Handful of known naming differences on source site.
   if (modelId === "toyota-toyota-aygo-x") {
     candidates.add("toyota-aygo-x-cross")
+    candidates.add("toyota-aygo-x")
   }
   if (modelId.includes("glc")) {
     candidates.add("mercedes-benz-glc-coupe")
+    candidates.add("mercedes-benz-clase-glc")
+    candidates.add("mercedes-clase-glc")
+    candidates.add("mercedes-glc")
+  }
+  if (modelId === "byd-byd-seal-u-dm-i") {
+    candidates.add("byd-seal-u")
   }
 
   return [...candidates]
 }
 
+function buildKm77ModelCandidates(modelSlug) {
+  const candidates = new Set([modelSlug])
+
+  if (modelSlug.startsWith("clase-")) {
+    candidates.add(modelSlug.replace(/^clase-/, ""))
+  } else {
+    candidates.add(`clase-${modelSlug}`)
+  }
+
+  const parts = modelSlug.split("-").filter(Boolean)
+  if (parts.length >= 2) {
+    candidates.add(parts[0])
+  }
+  for (let i = parts.length - 1; i >= 2 && i >= parts.length - 2; i -= 1) {
+    candidates.add(parts.slice(0, i).join("-"))
+  }
+
+  return [...candidates].filter(Boolean)
+}
+
+function buildKm77StartUrls(brand, model) {
+  const base = `https://www.km77.com/coches/${brand}/${model}`
+  return [
+    base,
+    `${base}/datos`,
+    `${base}/listado-completo`,
+    `${base}/generaciones`,
+  ]
+}
+
 async function fetchText(url) {
-  const response = await fetch(url, {
-    headers: {
-      "user-agent": USER_AGENT,
-      accept: "text/html,application/xhtml+xml",
-    },
-  })
-  if (!response.ok) {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "user-agent": USER_AGENT,
+        accept: "text/html,application/xhtml+xml",
+      },
+    })
+    if (!response.ok) {
+      return null
+    }
+    return await response.text()
+  } catch {
     return null
   }
-  return await response.text()
 }
 
 function mapLabel(raw) {
   const value = raw.toUpperCase()
-  if (/^0$/.test(value)) {
+  if (/^0$/.test(value) || /(^|\s)0(\s|$)/.test(value)) {
     return "CERO"
   }
   if (value.includes("ZERO") || value.includes("CERO")) {
@@ -169,7 +263,7 @@ function mapPowertrain(fuelText, versionName) {
   if (/(\belectric\b|\belectrico\b|\bev\b|100% electr)/.test(text)) {
     return "electric"
   }
-  if (/diesel/.test(text)) {
+  if (/(diesel|gasoleo|gasóleo)/.test(text)) {
     return "diesel"
   }
   if (/gasolina/.test(text)) {
@@ -295,22 +389,42 @@ function htmlDecode(value) {
     .replace(/&nbsp;/g, " ")
 }
 
+function stripHtml(value) {
+  return htmlDecode(value)
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function extractKm77Field(html, labels) {
+  for (const label of labels) {
+    const re = new RegExp(
+      `<th[^>]*>\\s*${label}\\s*</th>\\s*<td[^>]*>([\\s\\S]*?)</td>`,
+      "i"
+    )
+    const match = html.match(re)
+    if (!match) {
+      continue
+    }
+
+    const tdHtml = match[1]
+    const titleMatch = tdHtml.match(/title=\"([^\"]+)\"/i)
+    const raw = titleMatch?.[1] ?? stripHtml(tdHtml)
+    if (raw) {
+      return htmlDecode(raw).trim()
+    }
+  }
+  return ""
+}
+
 function parseKm77SummaryVersions(html) {
-  const gearbox = htmlDecode(
-    html.match(
-      /<th[^>]*>\s*Caja de cambios\s*<\/th>\s*<td[^>]*>[\s\S]*?title="([^"]+)"/i
-    )?.[1] ?? ""
-  )
-  const dgt = htmlDecode(
-    html.match(
-      /<th[^>]*>\s*Distintivo medioambiental DGT\s*<\/th>\s*<td[^>]*>[\s\S]*?title="([^"]+)"/i
-    )?.[1] ?? ""
-  )
-  const fuel = htmlDecode(
-    html.match(
-      /<th[^>]*>\s*Combustible\s*<\/th>\s*<td[^>]*>[\s\S]*?title="([^"]+)"/i
-    )?.[1] ?? ""
-  )
+  const gearbox = extractKm77Field(html, ["Caja de cambios"])
+  const dgt = extractKm77Field(html, [
+    "Distintivo medioambiental DGT",
+    "Distintivo ambiental DGT",
+  ])
+  const fuel = extractKm77Field(html, ["Combustible"])
+  const electricRange = extractKm77Field(html, ["Autonomía eléctrica WLTP"])
 
   if (!gearbox || !dgt) {
     return []
@@ -327,17 +441,45 @@ function parseKm77SummaryVersions(html) {
 
   const versions = []
   const seen = new Set()
+  const electricRangeKm = Number.parseInt(
+    (electricRange.match(/\d+/)?.[0] ?? "0").trim(),
+    10
+  )
+
+  let powertrain = mapPowertrain(fuel, "")
+  if (electricRangeKm > 0) {
+    if (powertrain === "gasoline" || powertrain === "diesel") {
+      powertrain = "phev"
+    } else if (!powertrain) {
+      powertrain = "electric"
+    }
+  }
+  if (
+    powertrain === "gasoline" &&
+    /eco/i.test(dgt) &&
+    /(hybrid|h[ií]br|\bhev\b|\bmhev\b)/i.test(html)
+  ) {
+    powertrain = "hybrid"
+  }
+
+  const dgtLabelsToUse =
+    electricRangeKm > 0
+      ? labels
+      : labels.filter((labelText) => mapLabel(labelText) !== "CERO")
+
   for (const g of gearboxes) {
     const transmission = mapTransmissionFromLabel(g)
     if (!transmission) {
       continue
     }
-    for (const l of labels) {
+    for (const l of dgtLabelsToUse) {
       const dgtLabel = mapLabel(l)
       if (!dgtLabel) {
         continue
       }
-      const powertrain = mapPowertrain(fuel, "") || "gasoline"
+      if (!powertrain) {
+        continue
+      }
       const versionId = slugify(
         `km77-${powertrain}-${transmission}-${dgtLabel}`
       )
@@ -350,6 +492,39 @@ function parseKm77SummaryVersions(html) {
     }
   }
   return versions
+}
+
+function normalizeKm77Url(rawUrl) {
+  if (!rawUrl) {
+    return null
+  }
+  const trimmed = rawUrl.trim()
+  if (/^javascript:/i.test(trimmed)) {
+    return null
+  }
+  const absolute = trimmed.startsWith("http")
+    ? trimmed
+    : `https://www.km77.com${trimmed.startsWith("/") ? "" : "/"}${trimmed}`
+  if (!absolute.startsWith("https://www.km77.com/coches/")) {
+    return null
+  }
+  return absolute.replace(/#.*$/, "")
+}
+
+function extractKm77DataLinks(html) {
+  const links = new Set()
+  const hrefRe = /href=\"([^\"]+)\"/gi
+  for (const match of html.matchAll(hrefRe)) {
+    const normalized = normalizeKm77Url(match[1])
+    if (!normalized) {
+      continue
+    }
+    if (!/\/datos(\/equipamiento)?(\?|$)/.test(normalized)) {
+      continue
+    }
+    links.add(normalized.replace(/\/datos\/equipamiento(\?|$)/, "/datos$1"))
+  }
+  return [...links]
 }
 
 function escapeTs(value) {
@@ -393,7 +568,13 @@ function writeOutputTs(outputPath, versionsById) {
 async function main() {
   const mapping = JSON.parse(fs.readFileSync(MAPPING_JSON, "utf8"))
   const manualMetadataTs = fs.readFileSync(MANUAL_METADATA_TS, "utf8")
-  const targetIds = parseManualMissingVersionIds(manualMetadataTs)
+  const forcedIds = parseCliForcedIds(process.argv.slice(2))
+  const targetIds = [
+    ...new Set([
+      ...parseManualMissingVersionIds(manualMetadataTs),
+      ...forcedIds,
+    ]),
+  ]
 
   const enrichedById = {}
   const report = {
@@ -451,21 +632,47 @@ async function main() {
 
     if (versions.length === 0) {
       for (const brand of brandCandidates) {
-        for (const model of modelSlugs.slice(0, 8)) {
-          const url = `https://www.km77.com/coches/${brand}/${model}`
-          // eslint-disable-next-line no-await-in-loop
-          const html = await fetchText(url)
-          if (!html || /window\.pageId\.current\s*=\s*'pf_error'/.test(html)) {
-            continue
+        for (const modelSlug of modelSlugs.slice(0, 8)) {
+          const queue = [...(KM77_SEED_URLS_BY_ID[id] ?? [])]
+          for (const model of buildKm77ModelCandidates(modelSlug)) {
+            queue.push(...buildKm77StartUrls(brand, model))
           }
-          const parsed = parseKm77SummaryVersions(html)
-          if (parsed.length === 0) {
-            continue
+          const seenUrls = new Set()
+
+          while (queue.length > 0 && seenUrls.size < 14) {
+            const url = queue.shift()
+            if (!url || seenUrls.has(url)) {
+              continue
+            }
+            seenUrls.add(url)
+
+            // eslint-disable-next-line no-await-in-loop
+            const html = await fetchText(url)
+            if (
+              !html ||
+              /window\.pageId\.current\s*=\s*'pf_error'/.test(html)
+            ) {
+              continue
+            }
+
+            const parsed = parseKm77SummaryVersions(html)
+            if (parsed.length > 0) {
+              versions = parsed
+              sourceUsed = "km77"
+              sourceUrl = url
+              break
+            }
+
+            const discovered = extractKm77DataLinks(html)
+            for (const discoveredUrl of discovered) {
+              if (!seenUrls.has(discoveredUrl)) {
+                queue.push(discoveredUrl)
+              }
+            }
           }
-          versions = parsed
-          sourceUsed = "km77"
-          sourceUrl = url
-          break
+          if (versions.length > 0) {
+            break
+          }
         }
         if (versions.length > 0) {
           break
@@ -541,6 +748,9 @@ async function main() {
 
   console.log("Versions metadata fetch summary")
   console.log(`- target ids (missing versions): ${report.targetCount}`)
+  if (forcedIds.length > 0) {
+    console.log(`- forced ids (--ids): ${forcedIds.length}`)
+  }
   console.log(`- enriched ids: ${report.resolvedCount}`)
   console.log(
     `- source usage: ${JSON.stringify(

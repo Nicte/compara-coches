@@ -199,6 +199,26 @@ export const carMetadataVersionsAutoById: Record<string, CarMetadata> = {
       },
     ],
   },
+  "byd-byd-dolphin-surf": {
+    versions: [
+      {
+        id: "km77-electric-automatic-cero",
+        powertrain: "electric",
+        transmission: "automatic",
+        dgtLabel: "CERO",
+      },
+    ],
+  },
+  "byd-byd-seal-u-dm-i": {
+    versions: [
+      {
+        id: "km77-phev-automatic-cero",
+        powertrain: "phev",
+        transmission: "automatic",
+        dgtLabel: "CERO",
+      },
+    ],
+  },
   "citroen-nuevo-c4-hybrid-136": {
     versions: [
       {
@@ -1087,6 +1107,16 @@ export const carMetadataVersionsAutoById: Record<string, CarMetadata> = {
       },
     ],
   },
+  "kia-ev3": {
+    versions: [
+      {
+        id: "km77-electric-automatic-cero",
+        powertrain: "electric",
+        transmission: "automatic",
+        dgtLabel: "CERO",
+      },
+    ],
+  },
   "kia-niro": {
     versions: [
       {
@@ -1419,6 +1449,36 @@ export const carMetadataVersionsAutoById: Record<string, CarMetadata> = {
       },
     ],
   },
+  "mercedes-benz-gla-250-e": {
+    versions: [
+      {
+        id: "km77-phev-automatic-cero",
+        powertrain: "phev",
+        transmission: "automatic",
+        dgtLabel: "CERO",
+      },
+    ],
+  },
+  "mercedes-benz-glc-220-d-4matic": {
+    versions: [
+      {
+        id: "km77-diesel-automatic-eco",
+        powertrain: "diesel",
+        transmission: "automatic",
+        dgtLabel: "ECO",
+      },
+    ],
+  },
+  "mercedes-benz-glc-300-de-4matic": {
+    versions: [
+      {
+        id: "km77-phev-automatic-cero",
+        powertrain: "phev",
+        transmission: "automatic",
+        dgtLabel: "CERO",
+      },
+    ],
+  },
   "mg-mg-hs": {
     versions: [
       {
@@ -1468,6 +1528,38 @@ export const carMetadataVersionsAutoById: Record<string, CarMetadata> = {
         powertrain: "phev",
         transmission: "automatic",
         dgtLabel: "CERO",
+      },
+    ],
+  },
+  "mg-mg3": {
+    versions: [
+      {
+        id: "km77-gasoline-manual-c",
+        powertrain: "gasoline",
+        transmission: "manual",
+        dgtLabel: "C",
+      },
+      {
+        id: "km77-gasoline-automatic-c",
+        powertrain: "gasoline",
+        transmission: "automatic",
+        dgtLabel: "C",
+      },
+    ],
+  },
+  "mg-mg3-hybrid": {
+    versions: [
+      {
+        id: "km77-gasoline-manual-c",
+        powertrain: "gasoline",
+        transmission: "manual",
+        dgtLabel: "C",
+      },
+      {
+        id: "km77-gasoline-automatic-c",
+        powertrain: "gasoline",
+        transmission: "automatic",
+        dgtLabel: "C",
       },
     ],
   },
@@ -2252,6 +2344,26 @@ export const carMetadataVersionsAutoById: Record<string, CarMetadata> = {
       {
         id: "octavia-octavia-combi-1-5-tsi-mhev-selection-dsg7-110kw",
         powertrain: "mhev",
+        transmission: "automatic",
+        dgtLabel: "ECO",
+      },
+    ],
+  },
+  "tesla-model-y": {
+    versions: [
+      {
+        id: "km77-electric-automatic-cero",
+        powertrain: "electric",
+        transmission: "automatic",
+        dgtLabel: "CERO",
+      },
+    ],
+  },
+  "toyota-toyota-aygo-x": {
+    versions: [
+      {
+        id: "km77-hybrid-automatic-eco",
+        powertrain: "hybrid",
         transmission: "automatic",
         dgtLabel: "ECO",
       },
